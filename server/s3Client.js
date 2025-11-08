@@ -9,7 +9,11 @@ requiredEnv.forEach((key) => {
 })
 
 export const BUCKET = process.env.WEDDING_S3_BUCKET
-export const KEY_PREFIX = process.env.WEDDING_S3_PREFIX?.replace(/^\/+|\/+$|\s+/g, '')
+
+const rawPrefix = process.env.WEDDING_S3_PREFIX?.trim() ?? ''
+const prefixNoLeading = rawPrefix.replace(/^\/+/, '')
+export const KEY_PREFIX = prefixNoLeading.replace(/\/+$/, '')
+export const KEY_PREFIX_WITH_SLASH = KEY_PREFIX ? `${KEY_PREFIX}/` : ''
 
 let client
 

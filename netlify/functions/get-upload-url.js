@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { PutObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { getS3Client, BUCKET, KEY_PREFIX } from '../../server/s3Client.js'
+import { getS3Client, BUCKET, KEY_PREFIX_WITH_SLASH } from '../../server/s3Client.js'
 
 export async function handler(event) {
   if (event.httpMethod !== 'POST') {
@@ -17,7 +17,7 @@ export async function handler(event) {
     }
 
     const safeName = filename.replace(/\s+/g, '-').toLowerCase()
-    const key = `${KEY_PREFIX ? `${KEY_PREFIX.replace(/\/$/, '')}/` : ''}${new Date().toISOString()}-${randomUUID()}-${safeName}`
+    const key = `${KEY_PREFIX_WITH_SLASH}${new Date().toISOString()}-${randomUUID()}-${safeName}`
 
     const command = new PutObjectCommand({
       Bucket: BUCKET,

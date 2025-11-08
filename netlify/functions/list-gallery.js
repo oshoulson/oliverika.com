@@ -1,6 +1,6 @@
 import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { getS3Client, BUCKET, KEY_PREFIX } from '../../server/s3Client.js'
+import { getS3Client, BUCKET, KEY_PREFIX_WITH_SLASH } from '../../server/s3Client.js'
 
 const CACHE_MAX = 60
 
@@ -13,7 +13,7 @@ export async function handler(event) {
     const client = getS3Client()
     const command = new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: KEY_PREFIX,
+      Prefix: KEY_PREFIX_WITH_SLASH || undefined,
       MaxKeys: 50,
     })
 
