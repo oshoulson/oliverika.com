@@ -64,6 +64,7 @@ function App() {
   const [galleryItems, setGalleryItems] = useState(fallbackGallery)
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryError, setGalleryError] = useState('')
+  const hiddenFileInput = useRef(null)
 
   const isAttending = formData.attendance === 'yes'
   const bringingGuest = formData.bringingGuest === 'yes' && isAttending
@@ -89,6 +90,10 @@ function App() {
       const response = await fetch(`${FUNCTIONS_BASE}/list-gallery`)
       if (!response.ok) {
         throw new Error('Failed to load gallery')
+      }
+      const contentType = response.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        throw new Error('Gallery response not JSON')
       }
       const data = await response.json()
       if (Array.isArray(data.items) && data.items.length > 0) {
@@ -452,4 +457,3 @@ function App() {
 }
 
 export default App
-  const hiddenFileInput = useRef(null)
