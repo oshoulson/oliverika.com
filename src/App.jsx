@@ -196,8 +196,8 @@ function App() {
   return (
     <main className="min-h-screen bg-mist px-4 py-12 sm:px-8">
       <section className="relative mx-auto flex min-h-[520px] max-w-5xl flex-col overflow-hidden rounded-2xl bg-bone shadow-frame md:min-h-[600px] md:flex-row" id="home">
-        <div className="flex flex-col justify-between bg-sage px-8 py-10 text-bone md:w-1/2 lg:px-10">
-          <nav className="flex items-center gap-6 text-[0.65rem] uppercase tracking-[0.5em] text-bone/70">
+        <div className="flex flex-col justify-between bg-sage px-6 py-10 text-bone md:w-1/2 md:px-8 lg:px-10">
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 md:flex-nowrap md:gap-6 md:text-[0.65rem] md:tracking-[0.5em]">
             {navLinks.map((link) => (
               <a key={link.label} href={link.href} className="hover:text-white transition-colors">
                 {link.label}
@@ -205,8 +205,16 @@ function App() {
             ))}
           </nav>
 
-          <div className="space-y-6 pt-16">
-            <h1 className="font-serif text-6xl leading-tight md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
+          <div className="pt-12">
+            <div className="flex items-center justify-between sm:justify-start sm:gap-6">
+              <h1 className="font-serif text-5xl leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
+              <a
+                href="#rsvp"
+                className="inline-flex h-16 w-16 min-h-[4rem] min-w-[4rem] flex-none items-center justify-center rounded-full border border-white/70 bg-white/10 text-base font-serif italic uppercase tracking-[0.15em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:hidden"
+              >
+                RSVP
+              </a>
+            </div>
           </div>
 
           <div className="space-y-4 pt-10">
@@ -226,7 +234,7 @@ function App() {
 
         <a
           href="#rsvp"
-          className="absolute left-1/2 top-1/2 flex h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-white/10 text-[1.25rem] font-serif italic uppercase tracking-[0.25em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white"
+          className="absolute left-1/2 top-1/2 hidden h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-white/10 text-[1.25rem] font-serif italic uppercase tracking-[0.25em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:flex"
         >
           RSVP
         </a>
