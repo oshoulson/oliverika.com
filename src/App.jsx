@@ -307,9 +307,8 @@ function App() {
             {galleryLoading && <p className="text-sm text-sage-dark/80">Loading latest photos…</p>}
             <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
               {galleryItems.map((photo) => (
-                <figure key={photo.id} className="mb-4 break-inside-avoid overflow-hidden rounded-2xl shadow-lg ring-1 ring-black/5">
-                  <img src={photo.src} alt={photo.caption} className="w-full object-cover" loading="lazy" />
-                  <figcaption className="px-4 py-3 text-xs uppercase tracking-[0.25em] text-sage-dark/70">{photo.caption}</figcaption>
+                <figure key={photo.id} className="mb-4 break-inside-avoid overflow-hidden">
+                  <img src={photo.src} alt="" className="w-full object-cover" loading="lazy" />
                 </figure>
               ))}
             </div>

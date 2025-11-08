@@ -37,6 +37,7 @@ export async function handler(event) {
       statusCode: 200,
       headers: {
         'Cache-Control': `public, max-age=${CACHE_MAX}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({ items }),
     }
