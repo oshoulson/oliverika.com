@@ -12,7 +12,6 @@ const navLinks = [
 const details = [
   { label: 'Date', value: 'October 11, 2026' },
   { label: 'Arrival', value: 'Guests at 4:30 PM' },
-  { label: 'Ceremony', value: 'Begins at 5:00 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
 ]
@@ -20,7 +19,7 @@ const details = [
 const travelNotes = [
   { title: 'Stay Nearby', text: 'We reserved blocks at Hotel Commonwealth (Boston) and The Wellesley Inn. Mention “Oliver & Erika” for preferred rates through April 15.' },
   { title: 'Getting There', text: 'The venue is a 30-minute ride from downtown Boston. Rideshare drop-off is at the Cheney Gate entrance; limited parking is available on site.' },
-  { title: 'Dress Code', text: 'Garden cocktail attire. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
+  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
 ]
 
 const fallbackGallery = [
@@ -207,8 +206,7 @@ function App() {
           </nav>
 
           <div className="space-y-6 pt-16">
-            <span className="text-xs uppercase tracking-[0.5em] text-bone/60">10 · 11 · 26</span>
-            <h1 className="font-serif text-6xl leading-tight md:text-7xl lg:text-8xl">Oliver &amp; Erika</h1>
+            <h1 className="font-serif text-6xl leading-tight md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
           </div>
 
           <div className="space-y-4 pt-10">
@@ -228,7 +226,7 @@ function App() {
 
         <a
           href="#rsvp"
-          className="absolute left-1/2 top-1/2 flex h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-white/10 text-[0.65rem] uppercase tracking-[0.5em] text-white backdrop-blur-2xl transition hover:border-white"
+          className="absolute left-1/2 top-1/2 flex h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-white/10 text-[1.25rem] font-serif italic uppercase tracking-[0.25em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white"
         >
           RSVP
         </a>
@@ -268,12 +266,14 @@ function App() {
           <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Gallery</p>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="mt-4 font-serif text-4xl text-sage-dark">Moments we love</h2>
+              <h2 className="mt-4 font-serif text-4xl text-sage-dark"><em>Oliverika</em> Memories</h2>
               <p className="mt-2 max-w-xl text-sm text-charcoal/80">
-                Scroll through favorite captures from our story so far. We&apos;ll keep adding engagement, rehearsal, and
-                wedding-day photos as they come in.
+                Photos from the wedding (and other photos celebrating our love) will appear here. Please feel free to contribute your own!
               </p>
               {galleryError && <p className="mt-3 text-xs uppercase tracking-[0.3em] text-amber-700">{galleryError}</p>}
+              {!galleryError && galleryItems.length > 0 && (
+                <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/60 sm:hidden">Swipe within the gallery to see more</p>
+              )}
             </div>
             <div className="flex flex-col items-start gap-2 sm:items-end">
               <button
@@ -305,7 +305,7 @@ function App() {
           </div>
           <div className="mt-8 space-y-4">
             {galleryLoading && <p className="text-sm text-sage-dark/80">Loading latest photos…</p>}
-            <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
+            <div className="columns-1 gap-4 overflow-y-auto pr-2 max-h-[70vh] sm:max-h-none sm:overflow-visible sm:pr-0 sm:columns-2 lg:columns-3">
               {galleryItems.map((photo) => (
                 <figure key={photo.id} className="mb-4 break-inside-avoid overflow-hidden">
                   <img src={photo.src} alt="" className="w-full object-cover" loading="lazy" />
@@ -322,8 +322,7 @@ function App() {
             <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
             <h2 className="mt-4 font-serif text-4xl text-sage-dark">Let us know you&apos;re coming</h2>
             <p className="mt-4 text-sm text-charcoal/80">
-              We kindly request a response by April 30 so we can finalize guest counts. This form is a placeholder—submit
-              now and we&apos;ll follow up with final details once the official portal is ready.
+              We kindly request a response by April 30 so we can finalize guest counts.
             </p>
             <ul className="mt-6 space-y-3 text-sm text-charcoal/75">
               <li>• Include the name that appears on your invitation.</li>
@@ -376,7 +375,7 @@ function App() {
                       onChange={updateField('attendance')}
                       className="accent-sage"
                     />
-                    {value === 'yes' ? 'Joyfully attending' : 'Will celebrate from afar'}
+                    {value === 'yes' ? 'Obviously' : '😢😢😢😢'}
                   </label>
                 ))}
               </div>
