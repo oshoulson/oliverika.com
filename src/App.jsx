@@ -46,17 +46,23 @@ const fallbackGallery = [
 ]
 
 const FUNCTIONS_BASE = '/.netlify/functions'
+const RSVP_STORAGE_KEY = 'oliverikaRsvpSubmitted'
+
+const createInitialFormState = () => ({
+  fullName: '',
+  email: '',
+  attendance: 'yes',
+  bringingGuest: 'no',
+  guestName: '',
+  notes: '',
+})
 
 function App() {
-  const [formData, setFormData] = useState({
-    fullName: '',
-    email: '',
-    attendance: 'yes',
-    bringingGuest: 'no',
-    guestName: '',
-    notes: '',
-  })
+  const [formData, setFormData] = useState(createInitialFormState)
   const [formStatus, setFormStatus] = useState('idle')
+  const [formError, setFormError] = useState('')
+  const [hasSubmitted, setHasSubmitted] = useState(false)
+  const [submissionAction, setSubmissionAction] = useState('created')
   const [selectedFiles, setSelectedFiles] = useState([])
   const [uploadStatus, setUploadStatus] = useState('idle')
   const [uploadError, setUploadError] = useState('')
@@ -67,19 +73,86 @@ function App() {
 
   const isAttending = formData.attendance === 'yes'
   const bringingGuest = formData.bringingGuest === 'yes' && isAttending
+  const submissionLocked = hasSubmitted
 
   const updateField = (field) => (event) => {
     setFormData((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
-  const handleSubmit = (event) => {
-    event.preventDefault()
-    setFormStatus('submitting')
+  const rememberSubmissionFlag = () => {
+    try {
+      window.localStorage.setItem(RSVP_STORAGE_KEY, 'true')
+    } catch (error) {
+      console.warn('Unable to persist RSVP submission flag', error)
+    }
+  }
 
-    setTimeout(() => {
-      console.table(formData)
+  const clearSubmissionFlag = () => {
+    try {
+      window.localStorage.removeItem(RSVP_STORAGE_KEY)
+    } catch (error) {
+      console.warn('Unable to clear RSVP submission flag', error)
+    }
+  }
+
+  const handleAllowResubmit = () => {
+    clearSubmissionFlag()
+    setHasSubmitted(false)
+    setSubmissionAction('created')
+    setFormStatus('idle')
+    setFormError('')
+  }
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    if (formStatus === 'submitting') return
+    if (hasSubmitted) {
+      setFormError('We already have your RSVP. Click "Update RSVP" if you need to make a change.')
+      return
+    }
+
+    setFormStatus('submitting')
+    setFormError('')
+
+    const includesGuest = formData.attendance === 'yes' && formData.bringingGuest === 'yes'
+    const payload = {
+      fullName: formData.fullName.trim(),
+      email: formData.email.trim(),
+      attendance: formData.attendance,
+      bringingGuest: formData.bringingGuest,
+      guestName: includesGuest ? formData.guestName.trim() : '',
+      notes: formData.notes.trim(),
+    }
+
+    try {
+      const response = await fetch(`${FUNCTIONS_BASE}/submit-rsvp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      let parsedBody = null
+      try {
+        parsedBody = await response.json()
+      } catch (parseError) {
+        console.warn('Unable to parse RSVP response body', parseError)
+      }
+
+      if (!response.ok) {
+        const message = parsedBody?.error || 'Unable to send your RSVP right now. Please try again.'
+        throw new Error(message)
+      }
+
+      setSubmissionAction(parsedBody?.action === 'updated' ? 'updated' : 'created')
+      rememberSubmissionFlag()
+      setHasSubmitted(true)
       setFormStatus('success')
-    }, 600)
+      setFormData(createInitialFormState())
+    } catch (error) {
+      console.error('submit rsvp error', error)
+      setFormStatus('error')
+      setFormError(error.message || 'Unable to send your RSVP right now. Please try again or email us.')
+    }
   }
 
   const refreshGallery = async () => {
@@ -118,6 +191,17 @@ function App() {
 
   useEffect(() => {
     refreshGallery()
+  }, [])
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(RSVP_STORAGE_KEY)
+      if (stored === 'true') {
+        setHasSubmitted(true)
+      }
+    } catch (error) {
+      console.warn('Unable to read RSVP submission flag', error)
+    }
   }, [])
 
   const triggerFilePicker = () => {
@@ -339,13 +423,34 @@ function App() {
             </ul>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="fullName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                Full Name
-              </label>
-              <input
-                id="fullName"
+          <div className="space-y-4">
+            {hasSubmitted && (
+              <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
+                <p>
+                  {submissionAction === 'updated'
+                    ? 'We already updated your RSVP with the latest info.'
+                    : 'Thanks! We already have your RSVP on file.'}
+                </p>
+                <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                  Need to make a change? Click below to unlock the form.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleAllowResubmit}
+                  className="mt-3 rounded-full border border-sage/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                >
+                  Update RSVP
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-6" aria-disabled={submissionLocked}>
+              <div>
+                <label htmlFor="fullName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                  Full Name
+                </label>
+                <input
+                  id="fullName"
                 type="text"
                 required
                 value={formData.fullName}
@@ -444,18 +549,24 @@ function App() {
             <div className="flex flex-col gap-2">
               <button
                 type="submit"
-                disabled={formStatus === 'submitting'}
+                disabled={submissionLocked || formStatus === 'submitting'}
                 className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
               >
                 {formStatus === 'submitting' ? 'Sending…' : 'Submit RSVP'}
               </button>
               {formStatus === 'success' && (
-                <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                  Thanks! We&apos;ll be in touch with next steps.
+                <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/70" role="status">
+                  {submissionAction === 'updated' ? 'We updated your RSVP. Thank you!' : 'Thanks! We&apos;ll be in touch with next steps.'}
+                </p>
+              )}
+              {formStatus === 'error' && formError && (
+                <p className="text-sm text-amber-700" role="alert">
+                  {formError}
                 </p>
               )}
             </div>
           </form>
+          </div>
         </div>
       </section>
     </main>
