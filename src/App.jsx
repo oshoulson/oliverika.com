@@ -340,7 +340,7 @@ function App() {
 
           <div className="pt-12">
             <div className="flex items-center justify-between sm:justify-start sm:gap-6">
-              <h1 className="font-serif text-5xl leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
+              <h1 className="font-serif text-[15vw] leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
               <a
                 href="#rsvp"
                 className="inline-flex h-16 w-16 min-h-[4rem] min-w-[4rem] flex-none items-center justify-center rounded-full border border-white/70 bg-white/10 text-base font-serif italic uppercase tracking-[0.15em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:hidden"
