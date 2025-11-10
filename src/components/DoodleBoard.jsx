@@ -117,7 +117,7 @@ const DoodleBoard = forwardRef(function DoodleBoard(
     <div className={`relative rounded-2xl bg-white ${className}`}>
       <canvas
         ref={canvasRef}
-        className={`h-auto w-full rounded-2xl bg-white transition ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-crosshair'}`}
+        className={`h-auto w-full rounded-2xl bg-white transition touch-none ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-crosshair'}`}
         onPointerDown={startDrawing}
         onPointerMove={drawStroke}
         onPointerUp={stopDrawing}
