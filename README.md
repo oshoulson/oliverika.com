@@ -7,7 +7,7 @@ Custom React + Vite experience for sharing event details, collecting RSVPs, and 
 The `/.netlify/functions/submit-rsvp` function appends every submission to a Google Sheet so you can review and sort responses in one place.
 
 1. **Create the sheet**
-   - Add a tab named `RSVPs` (or change the `GOOGLE_SHEETS_RANGE` env var) with a header row such as `Timestamp | Name | Email | Attendance | Plus One | Guest Name | Notes`.
+   - Add a tab named `RSVPs` (or change the `GOOGLE_SHEETS_RANGE` env var) with a header row such as `Timestamp | Name | Email | Attendance | Plus One | Guest Name | Notes | Doodle Key`.
    - Copy the spreadsheet ID from the sheet URL: `https://docs.google.com/spreadsheets/d/<THIS_PART_IS_THE_ID>/edit`.
 
 2. **Create Google credentials (one-time)**
@@ -17,7 +17,8 @@ The `/.netlify/functions/submit-rsvp` function appends every submission to a Goo
 
 3. **Configure Netlify environment variables**
    - `GOOGLE_SHEETS_ID` – the ID from step 1.
-   - `GOOGLE_SHEETS_RANGE` *(optional)* – defaults to `RSVPs!A:G`. Update if you renamed the tab or want more columns.
+   - `GOOGLE_SHEETS_RANGE` *(optional)* – defaults to `RSVPs!A:H`. Update if you renamed the tab or want more columns.
+   - `WEDDING_S3_DOODLE_PREFIX` *(optional)* – folder/prefix inside your wedding bucket (defaults to `<WEDDING_S3_PREFIX>/doodles`).
    - Service-account credentials: either
      - `GOOGLE_SERVICE_ACCOUNT` – paste the raw JSON key into Netlify’s “environment variable” modal (Netlify preserves newlines), **or**
      - `GOOGLE_SERVICE_ACCOUNT_B64` – `base64` encode the JSON if you prefer (`cat key.json | base64`).
@@ -30,6 +31,12 @@ The `/.netlify/functions/submit-rsvp` function appends every submission to a Goo
 
 5. **Production verification**
    - After deploying, send yourself a test RSVP from `oliverika.com`, refresh the sheet, and verify the row + timestamp.
+
+### Guest doodles
+
+- Guests can now sketch directly on a small canvas that stays visible next to the RSVP instructions.
+- Each doodle saves as a PNG in S3 under the `WEDDING_S3_DOODLE_PREFIX`, using the same bucket/credentials as the gallery uploader. The Netlify function writes the resulting object key into the `Doodle Key` column and stores the artist name/email as S3 metadata for quick lookup later.
+- Grab the doodles straight from S3 (or via CDN) whenever you're ready to print them.
 
 ### Duplicate protection
 
@@ -49,5 +56,7 @@ The `/.netlify/functions/submit-rsvp` function appends every submission to a Goo
 | --- | --- | --- |
 | `GOOGLE_SERVICE_ACCOUNT` or `GOOGLE_SERVICE_ACCOUNT_B64` | ✅ | Service-account JSON used to authorize the Sheets API. |
 | `GOOGLE_SHEETS_ID` | ✅ | Spreadsheet ID that stores RSVP data. |
-| `GOOGLE_SHEETS_RANGE` | ❌ | Sheet tab + columns to write to (default `RSVPs!A:G`). |
-| `AWS_*` variables | ✅ | Already used for gallery uploads (unchanged). |
+| `GOOGLE_SHEETS_RANGE` | ❌ | Sheet tab + columns to write to (default `RSVPs!A:H`). |
+| `WEDDING_S3_DOODLE_PREFIX` | ❌ | Folder/prefix for doodles within the existing wedding bucket (defaults to `doodles`). |
+| `RSVP_DOODLE_MAX_BYTES` | ❌ | Override the max PNG size the doodle uploader accepts (defaults to ~100 KB). |
+| `AWS_*` variables | ✅ | Already required for gallery uploads and now reused for doodles. |

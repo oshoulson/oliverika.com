@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import heroImage from './assets/hero.jpg'
+import DoodleBoard from './components/DoodleBoard.jsx'
 
 const navLinks = [
   { label: 'Home', href: '#home' },
@@ -48,6 +49,29 @@ const fallbackGallery = [
 const FUNCTIONS_BASE = '/.netlify/functions'
 const RSVP_STORAGE_KEY = 'oliverikaRsvpSubmitted'
 
+const useIsDesktop = () => {
+  const getMatch = () => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false
+    }
+    return window.matchMedia('(min-width: 768px)').matches
+  }
+  const [isDesktop, setIsDesktop] = useState(getMatch)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return () => {}
+    }
+    const mediaQuery = window.matchMedia('(min-width: 768px)')
+    const handler = (event) => setIsDesktop(event.matches)
+    mediaQuery.addEventListener('change', handler)
+    setIsDesktop(mediaQuery.matches)
+    return () => mediaQuery.removeEventListener('change', handler)
+  }, [])
+
+  return isDesktop
+}
+
 const createInitialFormState = () => ({
   fullName: '',
   email: '',
@@ -69,7 +93,10 @@ function App() {
   const [galleryItems, setGalleryItems] = useState(fallbackGallery)
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryError, setGalleryError] = useState('')
+  const [hasDoodle, setHasDoodle] = useState(false)
   const hiddenFileInput = useRef(null)
+  const doodleBoardRef = useRef(null)
+  const isDesktop = useIsDesktop()
 
   const isAttending = formData.attendance === 'yes'
   const bringingGuest = formData.bringingGuest === 'yes' && isAttending
@@ -95,6 +122,11 @@ function App() {
     }
   }
 
+  const handleClearDoodle = () => {
+    if (submissionLocked) return
+    doodleBoardRef.current?.clear?.()
+  }
+
   const handleAllowResubmit = () => {
     clearSubmissionFlag()
     setHasSubmitted(false)
@@ -115,6 +147,7 @@ function App() {
     setFormError('')
 
     const includesGuest = formData.attendance === 'yes' && formData.bringingGuest === 'yes'
+    const doodleDataUrl = hasDoodle ? doodleBoardRef.current?.toDataUrl?.() || '' : ''
     const payload = {
       fullName: formData.fullName.trim(),
       email: formData.email.trim(),
@@ -122,6 +155,7 @@ function App() {
       bringingGuest: formData.bringingGuest,
       guestName: includesGuest ? formData.guestName.trim() : '',
       notes: formData.notes.trim(),
+      doodleDataUrl,
     }
 
     try {
@@ -148,6 +182,7 @@ function App() {
       setHasSubmitted(true)
       setFormStatus('success')
       setFormData(createInitialFormState())
+      doodleBoardRef.current?.clear?.()
     } catch (error) {
       console.error('submit rsvp error', error)
       setFormStatus('error')
@@ -276,6 +311,20 @@ function App() {
       setTimeout(() => setUploadStatus('idle'), 2000)
     }
   }
+
+  const renderDoodleArea = (wrapperClass = '', boardWrapperClass = '') => (
+    <div className={`space-y-3 ${wrapperClass}`}>
+      <DoodleBoard ref={doodleBoardRef} disabled={submissionLocked} onHasDrawingChange={setHasDoodle} className={`mx-auto w-full ${boardWrapperClass}`} />
+      <button
+        type="button"
+        onClick={handleClearDoodle}
+        disabled={!hasDoodle || submissionLocked}
+        className="rounded-full border border-sage/40 px-4 py-2 text-[0.65rem] uppercase tracking-[0.4em] text-sage-dark transition hover:border-sage hover:text-sage-dark disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Clear doodle
+      </button>
+    </div>
+  )
 
   return (
     <main className="min-h-screen bg-mist px-4 py-12 sm:px-8">
@@ -410,17 +459,20 @@ function App() {
 
       <section id="rsvp" className="mx-auto mt-16 max-w-5xl rounded-2xl bg-white/80 p-10 text-charcoal shadow-frame backdrop-blur">
         <div className="grid gap-10 md:grid-cols-[1.1fr,0.9fr]">
-          <div>
-            <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
-            <h2 className="mt-4 font-serif text-4xl text-sage-dark">Let us know you&apos;re coming</h2>
-            <p className="mt-4 text-sm text-charcoal/80">
-              We kindly request a response by April 30 so we can finalize guest counts.
-            </p>
-            <ul className="mt-6 space-y-3 text-sm text-charcoal/75">
-              <li>• Include the name that appears on your invitation.</li>
-              <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
-              <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
-            </ul>
+          <div className="flex h-full flex-col">
+            <div>
+              <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
+              <h2 className="mt-4 font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
+              <p className="mt-4 text-sm text-charcoal/80">
+                We kindly request a response by April 30 so we can finalize guest counts.
+              </p>
+              <ul className="mt-6 space-y-3 text-sm text-charcoal/75">
+                <li>• Include the name that appears on your invitation.</li>
+                <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
+                <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
+              </ul>
+            </div>
+            {isDesktop && <div className="mt-10 w-full max-w-sm md:mt-auto md:pt-10">{renderDoodleArea('', 'max-w-sm')}</div>}
           </div>
 
           <div className="space-y-4">
@@ -428,7 +480,7 @@ function App() {
               <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
                 <p>
                   {submissionAction === 'updated'
-                    ? 'We already updated your RSVP with the latest info.'
+                    ? 'We have updated your RSVP with the latest info.'
                     : 'Thanks! We already have your RSVP on file.'}
                 </p>
                 <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/70">
@@ -546,6 +598,8 @@ function App() {
               />
             </div>
 
+            {!isDesktop && renderDoodleArea('pt-2', '')}
+
             <div className="flex flex-col gap-2">
               <button
                 type="submit"
@@ -554,11 +608,6 @@ function App() {
               >
                 {formStatus === 'submitting' ? 'Sending…' : 'Submit RSVP'}
               </button>
-              {formStatus === 'success' && (
-                <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/70" role="status">
-                  {submissionAction === 'updated' ? 'We updated your RSVP. Thank you!' : 'Thanks! We&apos;ll be in touch with next steps.'}
-                </p>
-              )}
               {formStatus === 'error' && formError && (
                 <p className="text-sm text-amber-700" role="alert">
                   {formError}
@@ -569,6 +618,11 @@ function App() {
           </div>
         </div>
       </section>
+      {formStatus === 'success' && (
+        <div className="mx-auto mt-6 w-full max-w-5xl rounded-2xl border border-sage/30 bg-sage/10 p-4 text-center text-sm text-sage-dark" role="status">
+          <p>{submissionAction === 'updated' ? 'We updated your RSVP. Thank you!' : "Thanks! We'll be in touch with next steps."}</p>
+        </div>
+      )}
     </main>
   )
 }

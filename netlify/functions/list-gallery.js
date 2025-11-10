@@ -2,6 +2,11 @@ import { ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { getS3Client, BUCKET, KEY_PREFIX_WITH_SLASH } from '../../server/s3Client.js'
 
+const normalizePrefix = (value = '') => value.trim().replace(/^\/+|\/+$/g, '')
+const doodlePrefixValue = normalizePrefix(process.env.WEDDING_S3_DOODLE_PREFIX || (KEY_PREFIX_WITH_SLASH ? `${KEY_PREFIX_WITH_SLASH}doodles` : 'doodles'))
+const DOODLE_PREFIX = normalizePrefix(doodlePrefixValue)
+const DOODLE_PREFIX_WITH_SLASH = DOODLE_PREFIX ? `${DOODLE_PREFIX}/` : ''
+
 const CACHE_MAX = 60
 
 export async function handler(event) {
@@ -18,7 +23,11 @@ export async function handler(event) {
     })
 
     const { Contents = [] } = await client.send(command)
-    const filtered = Contents.filter((item) => item.Key && !item.Key.endsWith('/')).sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+    const filtered = Contents.filter((item) => {
+      if (!item.Key || item.Key.endsWith('/')) return false
+      if (DOODLE_PREFIX_WITH_SLASH && item.Key.startsWith(DOODLE_PREFIX_WITH_SLASH)) return false
+      return true
+    }).sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
 
     const items = await Promise.all(
       filtered.map(async (item) => {
