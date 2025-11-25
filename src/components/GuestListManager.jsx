@@ -401,7 +401,19 @@ export default function GuestListManager() {
   }
 
   const updateHousehold = (id, updates) => {
-    setHouseholds((prev) => prev.map((household) => (household.id === id ? { ...household, ...updates } : household)))
+    setHouseholds((prev) =>
+      prev.map((household) => {
+        if (household.id !== id) return household
+        const next = { ...household, ...updates }
+        if (typeof updates.envelopeName === 'string') {
+          const oldSlug = household.slug || slugify(household.envelopeName || '')
+          if (!household.slug || oldSlug === household.slug || household.slug.startsWith('new_household')) {
+            next.slug = slugify(updates.envelopeName)
+          }
+        }
+        return next
+      }),
+    )
     queuePersist()
   }
 
