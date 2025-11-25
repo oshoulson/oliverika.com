@@ -630,10 +630,6 @@ export default function GuestListManager() {
         <div>
           <p className="text-sm font-semibold text-sage-dark">Guest list</p>
           <h1 className="mt-1 font-serif text-4xl text-sage-dark">Wedding guest manager</h1>
-          <p className="mt-2 max-w-2xl text-sm text-charcoal/75">
-            Track invitations at the household level, then expand each invite to edit guests underneath. Data lives in your browser for
-            now; wire up Sheets or Airtable later to share edits.
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
