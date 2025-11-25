@@ -1,8 +1,17 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 
 const AUTH_STORAGE_KEY = 'oliverikaGuestListAuth'
-const DATA_STORAGE_KEY = 'oliverikaGuestListData'
-const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'guest-access'
+export const DATA_STORAGE_KEY = 'oliverikaGuestListData'
+const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
+
+export const slugify = (text) => {
+  const cleaned = (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_')
+  return cleaned || `invite_${Math.random().toString(16).slice(2)}`
+}
 
 const createId = (prefix) => {
   const idSource = globalThis.crypto?.randomUUID?.() || Math.random().toString(16).slice(2)
@@ -13,6 +22,7 @@ const seedHouseholds = [
   {
     id: createId('household'),
     envelopeName: 'The Shoulson Family',
+    slug: slugify('The Shoulson Family'),
     invitedBy: 'Groom',
     address: {
       line1: '42 Garden Terrace',
@@ -22,16 +32,17 @@ const seedHouseholds = [
       country: 'USA',
     },
     email: 'parents@example.com',
-  phone: '(617) 555-1198',
-  saveTheDateSent: true,
-  invitationSent: false,
-  plusOneAllowed: false,
-  plusOneAccepted: false,
-  rsvpStatus: 'Awaiting response',
-  table: 'Parents',
-  dietaryRestrictions: 'None',
-  notes: 'Prefer seating close to dance floor.',
-  guests: [
+    phone: '(617) 555-1198',
+    saveTheDateSent: true,
+    invitationSent: false,
+    plusOneAllowed: false,
+    plusOneAccepted: false,
+    rsvpStatus: 'Awaiting response',
+    table: 'Parents',
+    dietaryRestrictions: 'None',
+    notes: 'Prefer seating close to dance floor.',
+    rsvpLocked: false,
+    guests: [
       {
         id: createId('guest'),
         name: 'Oliver Shoulson',
@@ -53,6 +64,7 @@ const seedHouseholds = [
   {
     id: createId('household'),
     envelopeName: 'Alex & Jordan Rivera',
+    slug: slugify('Alex & Jordan Rivera'),
     invitedBy: 'Both',
     address: {
       line1: '18 Beacon Street Apt 4C',
@@ -62,16 +74,17 @@ const seedHouseholds = [
       country: 'USA',
     },
     email: 'riveras@example.com',
-  phone: '(617) 555-2222',
-  saveTheDateSent: true,
-  invitationSent: true,
-  plusOneAllowed: true,
-  plusOneAccepted: false,
-  rsvpStatus: 'Awaiting response',
-  table: 'TBD',
-  dietaryRestrictions: 'None',
-  notes: 'Tight travel schedule; follow up after July 1.',
-  guests: [
+    phone: '(617) 555-2222',
+    saveTheDateSent: true,
+    invitationSent: true,
+    plusOneAllowed: true,
+    plusOneAccepted: false,
+    rsvpStatus: 'Awaiting response',
+    table: 'TBD',
+    dietaryRestrictions: 'None',
+    notes: 'Tight travel schedule; follow up after July 1.',
+    rsvpLocked: false,
+    guests: [
       {
         id: createId('guest'),
         name: 'Alex Rivera',
@@ -101,6 +114,7 @@ const seedHouseholds = [
   {
     id: createId('household'),
     envelopeName: 'Riley Morgan & Family',
+    slug: slugify('Riley Morgan & Family'),
     invitedBy: 'Bride',
     address: {
       line1: '510 Cedar Lane',
@@ -110,16 +124,17 @@ const seedHouseholds = [
       country: 'USA',
     },
     email: 'riley.m@example.com',
-  phone: '(860) 555-8765',
-  saveTheDateSent: false,
-  invitationSent: false,
-  plusOneAllowed: false,
-  plusOneAccepted: false,
-  rsvpStatus: 'Awaiting response',
-  table: 'Kids table?',
-  dietaryRestrictions: 'Kosher style',
-  notes: 'Driving in day-of; add parking pass.',
-  guests: [
+    phone: '(860) 555-8765',
+    saveTheDateSent: false,
+    invitationSent: false,
+    plusOneAllowed: false,
+    plusOneAccepted: false,
+    rsvpStatus: 'Awaiting response',
+    table: 'Kids table?',
+    dietaryRestrictions: 'Kosher style',
+    notes: 'Driving in day-of; add parking pass.',
+    rsvpLocked: false,
+    guests: [
       {
         id: createId('guest'),
         name: 'Riley Morgan',
@@ -161,6 +176,7 @@ const inputClass =
 const blankHousehold = () => ({
   id: createId('household'),
   envelopeName: 'New household',
+  slug: slugify('New household'),
   invitedBy: 'Both',
   address: { line1: '', city: '', state: '', postalCode: '', country: '' },
   email: '',
@@ -173,6 +189,7 @@ const blankHousehold = () => ({
   table: '',
   dietaryRestrictions: 'None',
   notes: '',
+  rsvpLocked: false,
   guests: [
     {
       id: createId('guest'),
@@ -185,20 +202,32 @@ const blankHousehold = () => ({
   ],
 })
 
-const loadInitialHouseholds = () => {
-  if (typeof window === 'undefined') return seedHouseholds
+const ensureDerivedFields = (household) => ({
+  ...household,
+  slug: household.slug || slugify(household.envelopeName || 'household'),
+  plusOneAccepted: Boolean(household.plusOneAccepted),
+  rsvpLocked: Boolean(household.rsvpLocked),
+  guests: (household.guests || []).map((guest) => ({
+    ...guest,
+    rsvpStatus: guest.rsvpStatus || 'Awaiting response',
+    dietary: guest.dietary || 'None',
+  })),
+})
+
+export const loadInitialHouseholds = () => {
+  if (typeof window === 'undefined') return seedHouseholds.map(ensureDerivedFields)
   try {
     const stored = window.localStorage.getItem(DATA_STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed
+        return parsed.map(ensureDerivedFields)
       }
     }
   } catch (error) {
     console.warn('Unable to read guest list from storage', error)
   }
-  return seedHouseholds
+  return seedHouseholds.map(ensureDerivedFields)
 }
 
 export default function GuestListManager() {
@@ -603,6 +632,7 @@ export default function GuestListManager() {
             <tbody className="divide-y divide-sage/20">
               {households.map((household) => {
                 const isExpanded = expandedHouseholds.has(household.id)
+                const locked = household.rsvpLocked
                 return (
                   <Fragment key={household.id}>
                     <tr className="relative z-10 bg-white shadow-lg shadow-sage/25">
@@ -624,6 +654,9 @@ export default function GuestListManager() {
                               className={inputClass}
                               placeholder="Household name"
                             />
+                            {locked && (
+                              <p className="mt-1 text-xs font-semibold text-sage-dark/70">RSVP locked</p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -689,7 +722,7 @@ export default function GuestListManager() {
                               })
                             }
                             className={checkboxClass}
-                            disabled={!household.plusOneAllowed}
+                            disabled={!household.plusOneAllowed || locked}
                           />
                           Accepted
                         </label>
@@ -699,6 +732,7 @@ export default function GuestListManager() {
                           value={household.rsvpStatus}
                           onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
                           className={selectClass}
+                          disabled={locked}
                         >
                           {rsvpOptions.map((option) => (
                             <option key={option} value={option}>
@@ -843,6 +877,7 @@ export default function GuestListManager() {
                               value={guest.rsvpStatus}
                               onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
                               className={selectClass}
+                              disabled={locked}
                             >
                               {rsvpOptions.map((option) => (
                                 <option key={option} value={option}>
@@ -856,6 +891,7 @@ export default function GuestListManager() {
                               value={guest.dietary}
                               onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
                               className={selectClass}
+                              disabled={locked}
                             >
                               {dietaryOptions.map((option) => (
                                 <option key={option} value={option}>
@@ -868,7 +904,7 @@ export default function GuestListManager() {
                           <td className="px-3 py-3 w-[260px] text-sm text-charcoal/60">—</td>
                           <td className="px-3 py-3 w-[170px] text-sm text-charcoal/60">—</td>
                           <td className="px-3 py-3 w-[420px] text-sm text-charcoal/60">—</td>
-                          <td className="sticky right-0 px-3 py-3 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
+                          <td className="sticky right-0 px-3 py-3 w-[110px] text-right backdrop-blur bg-sage/10 shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                             <div className="flex justify-end">
                               <button
                                 type="button"

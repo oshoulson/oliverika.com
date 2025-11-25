@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import heroImage from './assets/hero.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
-import GuestListManager from './components/GuestListManager.jsx'
+import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, slugify } from './components/GuestListManager.jsx'
 
 const navLinks = [
   { label: 'Home', href: '#home' },
@@ -82,7 +82,7 @@ const createInitialFormState = () => ({
   notes: '',
 })
 
-function WeddingSite() {
+function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [formData, setFormData] = useState(createInitialFormState)
   const [formStatus, setFormStatus] = useState('idle')
   const [formError, setFormError] = useState('')
@@ -95,6 +95,11 @@ function WeddingSite() {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryError, setGalleryError] = useState('')
   const [hasDoodle, setHasDoodle] = useState(false)
+  const [targetResponses, setTargetResponses] = useState([])
+  const [targetNotes, setTargetNotes] = useState('')
+  const [targetPlusOne, setTargetPlusOne] = useState(false)
+  const [targetLocked, setTargetLocked] = useState(false)
+  const [targetEmail, setTargetEmail] = useState('')
   const hiddenFileInput = useRef(null)
   const doodleBoardRef = useRef(null)
   const isDesktop = useIsDesktop()
@@ -102,6 +107,7 @@ function WeddingSite() {
   const isAttending = formData.attendance === 'yes'
   const bringingGuest = formData.bringingGuest === 'yes' && isAttending
   const submissionLocked = hasSubmitted
+  const isSlugRsvp = Boolean(householdMatch)
 
   const updateField = (field) => (event) => {
     setFormData((prev) => ({ ...prev, [field]: event.target.value }))
@@ -136,7 +142,51 @@ function WeddingSite() {
     setFormError('')
   }
 
+  const handleHouseholdSubmit = (event) => {
+    event.preventDefault()
+    if (!householdMatch || targetLocked) return
+    setFormStatus('submitting')
+    setFormError('')
+    try {
+      const households = loadInitialHouseholds()
+      const slug = householdMatch.slug || slugify(householdMatch.envelopeName)
+      const updated = households.map((household) => {
+        if ((household.slug || slugify(household.envelopeName)) !== slug) return household
+        const guests = (household.guests || []).map((guest, index) => ({
+          ...guest,
+          rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
+        }))
+        const plusOneAccepted = household.plusOneAllowed ? targetPlusOne : false
+        const anyAccepted = guests.some((guest) => guest.rsvpStatus === 'Accepted') || plusOneAccepted
+        const allDeclined = guests.every((guest) => guest.rsvpStatus === 'Declined') && !plusOneAccepted
+        const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
+        return {
+          ...household,
+          email: targetEmail,
+          guests,
+          plusOneAccepted,
+          notes: targetNotes,
+          rsvpStatus,
+          rsvpLocked: true,
+        }
+      })
+      window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(updated))
+      const refreshed = updated.find((h) => (h.slug || slugify(h.envelopeName)) === slug)
+      onHouseholdUpdate?.(refreshed)
+      setTargetLocked(true)
+      setFormStatus('success')
+      setSubmissionAction('updated')
+      setHasSubmitted(true)
+    } catch (error) {
+      setFormStatus('error')
+      setFormError('Unable to save RSVP right now. Please try again.')
+    }
+  }
+
   const handleSubmit = async (event) => {
+    if (householdMatch) {
+      return handleHouseholdSubmit(event)
+    }
     event.preventDefault()
     if (formStatus === 'submitting') return
     if (hasSubmitted) {
@@ -239,6 +289,17 @@ function WeddingSite() {
       console.warn('Unable to read RSVP submission flag', error)
     }
   }, [])
+
+  useEffect(() => {
+    if (!householdMatch) return
+    setTargetResponses((householdMatch.guests || []).map((guest) => guest.rsvpStatus || 'Awaiting response'))
+    setTargetPlusOne(Boolean(householdMatch.plusOneAccepted))
+    setTargetNotes(householdMatch.notes || '')
+    setTargetEmail(householdMatch.email || '')
+    setTargetLocked(Boolean(householdMatch.rsvpLocked))
+    setHasSubmitted(Boolean(householdMatch.rsvpLocked))
+    setSubmissionAction(householdMatch.rsvpLocked ? 'updated' : 'created')
+  }, [householdMatch])
 
   const triggerFilePicker = () => {
     hiddenFileInput.current?.click()
@@ -484,138 +545,247 @@ function WeddingSite() {
                     ? 'We have updated your RSVP with the latest info.'
                     : 'Thanks! We already have your RSVP on file.'}
                 </p>
-                <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                  Need to make a change? Click below to unlock the form.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleAllowResubmit}
-                  className="mt-3 rounded-full border border-sage/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-sage-dark transition hover:border-sage hover:text-sage-dark"
-                >
-                  Update RSVP
-                </button>
+                {!isSlugRsvp && (
+                  <>
+                    <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                      Need to make a change? Click below to unlock the form.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAllowResubmit}
+                      className="mt-3 rounded-full border border-sage/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                    >
+                      Update RSVP
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-6" aria-disabled={submissionLocked}>
-              <div>
-                <label htmlFor="fullName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                  Full Name
-                </label>
-                <input
-                  id="fullName"
-                type="text"
-                required
-                value={formData.fullName}
-                onChange={updateField('fullName')}
-                className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                placeholder="First & Last Name"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="email" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={formData.email}
-                onChange={updateField('email')}
-                className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                placeholder="you@email.com"
-              />
-            </div>
-
-            <fieldset className="space-y-3">
-              <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Will you attend?</legend>
-              <div className="flex gap-4 text-sm">
-                {['yes', 'no'].map((value) => (
-                  <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
-                    <input
-                      type="radio"
-                      name="attendance"
-                      value={value}
-                      checked={formData.attendance === value}
-                      onChange={updateField('attendance')}
-                      className="accent-sage"
-                    />
-                    {value === 'yes' ? 'Obviously' : '😢😢😢😢'}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            {isAttending && (
-              <fieldset className="space-y-3">
-                <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Bringing a plus one?</legend>
-                <div className="flex gap-4 text-sm">
-                  {['no', 'yes'].map((value) => (
-                    <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
-                      <input
-                        type="radio"
-                        name="bringingGuest"
-                        value={value}
-                        checked={formData.bringingGuest === value}
-                        onChange={updateField('bringingGuest')}
-                        className="accent-sage"
-                      />
-                      {value === 'yes' ? 'Yes, noted on invite' : 'No, just me'}
-                    </label>
-                  ))}
+            {isSlugRsvp ? (
+              <form onSubmit={handleHouseholdSubmit} className="space-y-6" aria-disabled={targetLocked}>
+                <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
+                  <p className="font-semibold text-sage-dark">RSVP for {householdMatch?.envelopeName}</p>
+                  <p className="text-charcoal/70">Please reply for each person on your invite.</p>
+                  {householdMatch?.plusOneAllowed && (
+                    <p className="mt-2 text-xs text-charcoal/70">Plus-one noted on your envelope.</p>
+                  )}
                 </div>
-              </fieldset>
+
+                <div>
+                  <label htmlFor="slug-email" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                    Email for updates
+                  </label>
+                  <input
+                    id="slug-email"
+                    type="email"
+                    value={targetEmail}
+                    onChange={(event) => setTargetEmail(event.target.value)}
+                    disabled={targetLocked}
+                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
+                  />
+                </div>
+
+                {(householdMatch?.guests || []).map((guest, index) => {
+                  const current = targetResponses[index] || 'Awaiting response'
+                  const setValue = (value) =>
+                    setTargetResponses((prev) => {
+                      const next = [...prev]
+                      next[index] = value
+                      return next
+                    })
+                  return (
+                    <div key={guest.id} className="space-y-3 rounded-2xl border border-sage/20 bg-white/70 p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-sage-dark">{guest.name}, are you coming?</p>
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        {[
+                          { value: 'Accepted', label: 'Obviously' },
+                          { value: 'Declined', label: '😢😢😢😢' },
+                        ].map((option) => {
+                          const isActive = current === option.value
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              disabled={targetLocked}
+                              onClick={() => setValue(option.value)}
+                              className={`rounded-full border px-4 py-2 transition ${
+                                isActive
+                                  ? 'border-sage bg-sage text-white shadow-sm'
+                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {householdMatch?.plusOneAllowed && (
+                  <label className="flex items-center gap-3 rounded-2xl border border-sage/30 bg-white/70 px-4 py-3 text-sm text-charcoal/80">
+                    <input
+                      type="checkbox"
+                      checked={targetPlusOne}
+                      onChange={(event) => setTargetPlusOne(event.target.checked)}
+                      disabled={targetLocked}
+                      className="accent-sage h-4 w-4"
+                    />
+                    <span className="font-semibold text-sage-dark">Bringing your plus-one</span>
+                  </label>
+                )}
+
+                <div>
+                  <label htmlFor="slug-notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                    Notes / Requests
+                  </label>
+                  <textarea
+                    id="slug-notes"
+                    rows={3}
+                    value={targetNotes}
+                    onChange={(event) => setTargetNotes(event.target.value)}
+                    disabled={targetLocked}
+                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="submit"
+                    disabled={targetLocked || formStatus === 'submitting'}
+                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
+                  >
+                    {formStatus === 'submitting' ? 'Saving…' : targetLocked ? 'RSVP locked' : 'Submit RSVP'}
+                  </button>
+                  {formStatus === 'error' && formError && (
+                    <p className="text-sm text-amber-700" role="alert">
+                      {formError}
+                    </p>
+                  )}
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-6" aria-disabled={submissionLocked}>
+                <div>
+                  <label htmlFor="fullName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                    Full Name
+                  </label>
+                  <input
+                    id="fullName"
+                    type="text"
+                    required
+                    value={formData.fullName}
+                    onChange={updateField('fullName')}
+                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
+                    placeholder="First & Last Name"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="email" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                    Email
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    required
+                    value={formData.email}
+                    onChange={updateField('email')}
+                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
+                    placeholder="you@email.com"
+                  />
+                </div>
+
+                <fieldset className="space-y-3">
+                  <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Will you attend?</legend>
+                  <div className="flex gap-4 text-sm">
+                    {['yes', 'no'].map((value) => (
+                      <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
+                        <input
+                          type="radio"
+                          name="attendance"
+                          value={value}
+                          checked={formData.attendance === value}
+                          onChange={updateField('attendance')}
+                          className="accent-sage"
+                        />
+                        {value === 'yes' ? 'Obviously' : '😢😢😢😢'}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {isAttending && (
+                  <fieldset className="space-y-3">
+                    <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Bringing a plus one?</legend>
+                    <div className="flex gap-4 text-sm">
+                      {['no', 'yes'].map((value) => (
+                        <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
+                          <input
+                            type="radio"
+                            name="bringingGuest"
+                            value={value}
+                            checked={formData.bringingGuest === value}
+                            onChange={updateField('bringingGuest')}
+                            className="accent-sage"
+                          />
+                          {value === 'yes' ? 'Yes, noted on invite' : 'No, just me'}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+
+                {bringingGuest && (
+                  <div>
+                    <label htmlFor="guestName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                      Guest Name
+                    </label>
+                    <input
+                      id="guestName"
+                      type="text"
+                      required
+                      value={formData.guestName}
+                      onChange={updateField('guestName')}
+                      className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
+                      placeholder="Plus-one full name"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                    Notes / Requests
+                  </label>
+                  <textarea
+                    id="notes"
+                    rows={3}
+                    value={formData.notes}
+                    onChange={updateField('notes')}
+                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
+                  />
+                </div>
+
+                {!isDesktop && renderDoodleArea('pt-2', '')}
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="submit"
+                    disabled={submissionLocked || formStatus === 'submitting'}
+                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
+                  >
+                    {formStatus === 'submitting' ? 'Sending…' : 'Submit RSVP'}
+                  </button>
+                  {formStatus === 'error' && formError && (
+                    <p className="text-sm text-amber-700" role="alert">
+                      {formError}
+                    </p>
+                  )}
+                </div>
+              </form>
             )}
-
-            {bringingGuest && (
-              <div>
-                <label htmlFor="guestName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                  Guest Name
-                </label>
-                <input
-                  id="guestName"
-                  type="text"
-                  required
-                  value={formData.guestName}
-                  onChange={updateField('guestName')}
-                  className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                  placeholder="Plus-one full name"
-                />
-              </div>
-            )}
-
-            <div>
-              <label htmlFor="notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                Notes / Requests
-              </label>
-              <textarea
-                id="notes"
-                rows={3}
-                value={formData.notes}
-                onChange={updateField('notes')}
-                className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                placeholder="Accessibility needs, questions, song requests..."
-              />
-            </div>
-
-            {!isDesktop && renderDoodleArea('pt-2', '')}
-
-            <div className="flex flex-col gap-2">
-              <button
-                type="submit"
-                disabled={submissionLocked || formStatus === 'submitting'}
-                className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
-              >
-                {formStatus === 'submitting' ? 'Sending…' : 'Submit RSVP'}
-              </button>
-              {formStatus === 'error' && formError && (
-                <p className="text-sm text-amber-700" role="alert">
-                  {formError}
-                </p>
-              )}
-            </div>
-          </form>
           </div>
         </div>
       </section>
@@ -632,18 +802,28 @@ function App() {
   const [isGuestRoute, setIsGuestRoute] = useState(() =>
     typeof window !== 'undefined' ? window.location.pathname.startsWith('/guest-list') : false,
   )
+  const [slugHousehold, setSlugHousehold] = useState(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return () => {}
     const handleRouteChange = () => {
-      setIsGuestRoute(window.location.pathname.startsWith('/guest-list'))
+      const path = window.location.pathname
+      setIsGuestRoute(path.startsWith('/guest-list'))
+      if (!path || path === '/' || path.startsWith('/guest-list')) {
+        setSlugHousehold(null)
+        return
+      }
+      const slug = decodeURIComponent(path.replace(/^\//, ''))
+      const households = loadInitialHouseholds()
+      const match = households.find((household) => (household.slug || slugify(household.envelopeName)) === slug)
+      setSlugHousehold(match || null)
     }
     handleRouteChange()
     window.addEventListener('popstate', handleRouteChange)
     return () => window.removeEventListener('popstate', handleRouteChange)
   }, [])
 
-  return isGuestRoute ? <GuestListManager /> : <WeddingSite />
+  return isGuestRoute ? <GuestListManager /> : <WeddingSite householdMatch={slugHousehold} onHouseholdUpdate={setSlugHousehold} />
 }
 
 export default App
