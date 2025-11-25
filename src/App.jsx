@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import heroImage from './assets/hero.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
+import GuestListManager from './components/GuestListManager.jsx'
 
 const navLinks = [
   { label: 'Home', href: '#home' },
@@ -81,7 +82,7 @@ const createInitialFormState = () => ({
   notes: '',
 })
 
-function App() {
+function WeddingSite() {
   const [formData, setFormData] = useState(createInitialFormState)
   const [formStatus, setFormStatus] = useState('idle')
   const [formError, setFormError] = useState('')
@@ -339,11 +340,11 @@ function App() {
           </nav>
 
           <div className="pt-12">
-            <div className="flex items-center justify-between sm:justify-start sm:gap-6">
+            <div className="flex items-center gap-5 sm:gap-6">
               <h1 className="font-serif text-[15vw] leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
               <a
                 href="#rsvp"
-                className="inline-flex h-16 w-16 min-h-[4rem] min-w-[4rem] flex-none items-center justify-center rounded-full border border-white/70 bg-white/10 text-base font-serif italic uppercase tracking-[0.15em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:hidden"
+                className="inline-flex h-20 w-20 min-h-[5rem] min-w-[5rem] flex-none items-center justify-center rounded-full border border-white/70 bg-white/10 text-lg font-serif italic uppercase tracking-[0.15em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:hidden"
               >
                 RSVP
               </a>
@@ -625,6 +626,24 @@ function App() {
       )}
     </main>
   )
+}
+
+function App() {
+  const [isGuestRoute, setIsGuestRoute] = useState(() =>
+    typeof window !== 'undefined' ? window.location.pathname.startsWith('/guest-list') : false,
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return () => {}
+    const handleRouteChange = () => {
+      setIsGuestRoute(window.location.pathname.startsWith('/guest-list'))
+    }
+    handleRouteChange()
+    window.addEventListener('popstate', handleRouteChange)
+    return () => window.removeEventListener('popstate', handleRouteChange)
+  }, [])
+
+  return isGuestRoute ? <GuestListManager /> : <WeddingSite />
 }
 
 export default App
