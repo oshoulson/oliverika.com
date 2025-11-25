@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 
 const AUTH_STORAGE_KEY = 'oliverikaGuestListAuth'
 export const DATA_STORAGE_KEY = 'oliverikaGuestListData'
 const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
+const FUNCTIONS_BASE = '/.netlify/functions'
 
 export const slugify = (text) => {
   const cleaned = (text || '')
@@ -238,6 +239,10 @@ export default function GuestListManager() {
   const [households, setHouseholds] = useState(initialHouseholds)
   const [expandedHouseholds, setExpandedHouseholds] = useState(() => new Set(initialHouseholds.map((household) => household.id)))
   const [openMenuId, setOpenMenuId] = useState(null)
+  const [remoteStatus, setRemoteStatus] = useState('idle')
+  const [remoteError, setRemoteError] = useState('')
+  const saveTimer = useRef(null)
+  const isSavingRef = useRef(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -259,6 +264,79 @@ export default function GuestListManager() {
       console.warn('Unable to persist guest list', error)
     }
   }, [households])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadRemote = async () => {
+      setRemoteStatus('loading')
+      setRemoteError('')
+      try {
+        const response = await fetch(`${FUNCTIONS_BASE}/guest-list`)
+        if (!response.ok) {
+          throw new Error('Unable to load guest list')
+        }
+        const data = await response.json()
+        if (!Array.isArray(data.households)) {
+          throw new Error('Guest list response invalid')
+        }
+        const mapped = data.households.map(ensureDerivedFields)
+        if (!cancelled) {
+          setHouseholds(mapped)
+          setExpandedHouseholds(new Set(mapped.map((household) => household.id)))
+          try {
+            window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(mapped))
+          } catch (error) {
+            console.warn('Unable to cache guest list', error)
+          }
+          setRemoteStatus('ready')
+        }
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) {
+          setRemoteStatus('error')
+          setRemoteError(error.message || 'Unable to load guest list')
+        }
+      }
+    }
+    loadRemote()
+    return () => {
+      cancelled = true
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+      }
+    }
+  }, [])
+
+  const persistGuestList = async () => {
+    if (isSavingRef.current) return
+    isSavingRef.current = true
+    setRemoteStatus((status) => (status === 'loading' ? 'loading' : 'saving'))
+    setRemoteError('')
+    try {
+      const response = await fetch(`${FUNCTIONS_BASE}/guest-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ households }),
+      })
+      if (!response.ok) {
+        throw new Error('Save failed')
+      }
+      setRemoteStatus('saved')
+    } catch (error) {
+      console.error('save guest list error', error)
+      setRemoteStatus('error')
+      setRemoteError('Unable to save to server. Changes are still local.')
+    } finally {
+      isSavingRef.current = false
+    }
+  }
+
+  const queuePersist = () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+    }
+    saveTimer.current = setTimeout(persistGuestList, 600)
+  }
 
   const stats = useMemo(() => {
     const invitations = households.length
@@ -324,6 +402,7 @@ export default function GuestListManager() {
 
   const updateHousehold = (id, updates) => {
     setHouseholds((prev) => prev.map((household) => (household.id === id ? { ...household, ...updates } : household)))
+    queuePersist()
   }
 
   const updateAddressField = (id, field, value) => {
@@ -332,6 +411,7 @@ export default function GuestListManager() {
         household.id === id ? { ...household, address: { ...household.address, [field]: value } } : household,
       ),
     )
+    queuePersist()
   }
 
   const updateGuest = (householdId, guestId, updates) => {
@@ -342,6 +422,7 @@ export default function GuestListManager() {
           : household,
       ),
     )
+    queuePersist()
   }
 
   const addGuest = (householdId, type = 'primary') => {
@@ -359,6 +440,7 @@ export default function GuestListManager() {
       ),
     )
     setOpenMenuId(null)
+    queuePersist()
   }
 
   const removeHousehold = (householdId) => {
@@ -371,6 +453,7 @@ export default function GuestListManager() {
     if (openMenuId === householdId) {
       setOpenMenuId(null)
     }
+    queuePersist()
   }
 
   const removeGuest = (householdId, guestId) => {
@@ -381,6 +464,7 @@ export default function GuestListManager() {
         return { ...household, guests: remaining.length > 0 ? remaining : household.guests }
       }),
     )
+    queuePersist()
   }
 
   const toggleHouseholdExpanded = (householdId) => {
@@ -489,6 +573,7 @@ export default function GuestListManager() {
       return next
     })
     setOpenMenuId(null)
+    queuePersist()
   }
 
   if (!isAuthorized) {
@@ -560,6 +645,14 @@ export default function GuestListManager() {
           >
             Lock
           </button>
+          <span className="flex items-center rounded-full border border-sage/30 bg-white/80 px-3 py-2 text-xs font-semibold text-sage-dark/80">
+            {remoteStatus === 'loading' && 'Loading…'}
+            {remoteStatus === 'saving' && 'Saving…'}
+            {remoteStatus === 'saved' && 'Saved'}
+            {remoteStatus === 'error' && 'Offline (not saved)'}
+            {remoteStatus === 'idle' && 'Local only'}
+            {remoteStatus === 'ready' && 'Ready'}
+          </span>
         </div>
       </div>
 
