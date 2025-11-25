@@ -583,10 +583,6 @@ export default function GuestListManager() {
           <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Guest list</p>
           <div className="space-y-2">
             <h1 className="font-serif text-4xl text-sage-dark">Private guest manager</h1>
-            <p className="text-sm text-charcoal/75">
-              Enter the passphrase to view and edit the wedding guest list. This lock keeps casual visitors out; for sensitive data,
-              move this behind real auth later.
-            </p>
           </div>
           <form onSubmit={handleAuth} className="space-y-4">
             <div>
@@ -602,9 +598,6 @@ export default function GuestListManager() {
                 className="mt-2 w-full rounded-xl border border-sage/30 bg-white/80 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
                 placeholder="Enter site-only password"
               />
-              <p className="mt-1 text-xs text-charcoal/60">
-                Controlled by <code>VITE_GUEST_LIST_PASSWORD</code> (default is "guest-access" — change it!).
-              </p>
               {authError && <p className="mt-2 text-sm text-rose-800">{authError}</p>}
             </div>
             <button
