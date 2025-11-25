@@ -49,6 +49,17 @@ const fallbackGallery = [
 
 const FUNCTIONS_BASE = '/.netlify/functions'
 const RSVP_STORAGE_KEY = 'oliverikaRsvpSubmitted'
+const normalizeHousehold = (household) => ({
+  ...household,
+  slug: household.slug || slugify(household.envelopeName || 'household'),
+  plusOneAccepted: Boolean(household.plusOneAccepted),
+  rsvpLocked: Boolean(household.rsvpLocked),
+  guests: (household.guests || []).map((guest) => ({
+    ...guest,
+    rsvpStatus: guest.rsvpStatus || 'Awaiting response',
+    dietary: guest.dietary || 'None',
+  })),
+})
 
 const useIsDesktop = () => {
   const getMatch = () => {
@@ -803,6 +814,8 @@ function App() {
     typeof window !== 'undefined' ? window.location.pathname.startsWith('/guest-list') : false,
   )
   const [slugHousehold, setSlugHousehold] = useState(null)
+  const [householdCache, setHouseholdCache] = useState(null)
+  const [currentSlug, setCurrentSlug] = useState(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return () => {}
@@ -811,16 +824,48 @@ function App() {
       setIsGuestRoute(path.startsWith('/guest-list'))
       if (!path || path === '/' || path.startsWith('/guest-list')) {
         setSlugHousehold(null)
+        setCurrentSlug(null)
         return
       }
       const slug = decodeURIComponent(path.replace(/^\//, ''))
-      const households = loadInitialHouseholds()
+      setCurrentSlug(slug)
+      const households = householdCache || loadInitialHouseholds()
       const match = households.find((household) => (household.slug || slugify(household.envelopeName)) === slug)
       setSlugHousehold(match || null)
     }
     handleRouteChange()
     window.addEventListener('popstate', handleRouteChange)
     return () => window.removeEventListener('popstate', handleRouteChange)
+  }, [householdCache])
+
+  useEffect(() => {
+    if (!currentSlug || !householdCache) return
+    const match = householdCache.find((household) => (household.slug || slugify(household.envelopeName)) === currentSlug)
+    setSlugHousehold(match || null)
+  }, [currentSlug, householdCache])
+
+  useEffect(() => {
+    const loadRemote = async () => {
+      try {
+        const response = await fetch(`${FUNCTIONS_BASE}/guest-list`)
+        if (!response.ok) {
+          throw new Error('guest list fetch failed')
+        }
+        const data = await response.json()
+        if (Array.isArray(data.households)) {
+          const normalized = data.households.map(normalizeHousehold)
+          setHouseholdCache(normalized)
+          try {
+            window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(normalized))
+          } catch (error) {
+            console.warn('Unable to cache guest list', error)
+          }
+        }
+      } catch (error) {
+        console.warn('Unable to fetch guest list', error)
+      }
+    }
+    loadRemote()
   }, [])
 
   return isGuestRoute ? <GuestListManager /> : <WeddingSite householdMatch={slugHousehold} onHouseholdUpdate={setSlugHousehold} />
