@@ -646,6 +646,7 @@ export default function GuestListManager() {
             {remoteStatus === 'idle' && 'Local only'}
             {remoteStatus === 'ready' && 'Ready'}
           </span>
+          {remoteError && <span className="text-xs font-semibold text-rose-700">{remoteError}</span>}
         </div>
       </div>
 

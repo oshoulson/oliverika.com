@@ -21,10 +21,10 @@ const ok = (body) => ({
   body: JSON.stringify(body),
 })
 
-const bad = (statusCode, message) => ({
+const bad = (statusCode, message, extra = {}) => ({
   statusCode,
   headers,
-  body: JSON.stringify({ error: message }),
+  body: JSON.stringify({ error: message, ...extra }),
 })
 
 const handleGet = async () => {
@@ -43,11 +43,15 @@ const handleGet = async () => {
     const households = Array.isArray(parsed.households) ? parsed.households : []
     return ok({ households, updatedAt: parsed.updatedAt || null })
   } catch (error) {
-    if (error?.$metadata?.httpStatusCode === 404) {
+    const status = error?.$metadata?.httpStatusCode || 500
+    if (status === 404) {
       return ok({ households: [], updatedAt: null })
     }
     console.error('guest-list get error', error)
-    return bad(500, 'Unable to load guest list')
+    return bad(status === 403 ? 403 : 500, 'Unable to load guest list', {
+      detail: error?.message || null,
+      code: error?.name || null,
+    })
   }
 }
 
@@ -80,7 +84,11 @@ const handlePost = async (event) => {
     return ok({ saved: true })
   } catch (error) {
     console.error('guest-list save error', error)
-    return bad(500, 'Unable to save guest list')
+    const status = error?.$metadata?.httpStatusCode || 500
+    return bad(status === 403 ? 403 : 500, 'Unable to save guest list', {
+      detail: error?.message || null,
+      code: error?.name || null,
+    })
   }
 }
 
