@@ -49,6 +49,17 @@ const fallbackGallery = [
 
 const FUNCTIONS_BASE = '/.netlify/functions'
 const RSVP_STORAGE_KEY = 'oliverikaRsvpSubmitted'
+const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
+const normalizeRsvpStatus = (status) => {
+  const value = (status || '').trim()
+  if (['Both events', 'Ceremony only', 'Reception only', 'Not attending', 'Awaiting response'].includes(value)) {
+    return value
+  }
+  if (value === 'Accepted') return 'Both events'
+  if (value === 'Declined') return 'Not attending'
+  if (value === 'Tentative' || value === 'Not offered') return 'Awaiting response'
+  return 'Awaiting response'
+}
 const normalizeHousehold = (household) => ({
   ...household,
   slug: household.slug || slugify(household.envelopeName || 'household'),
@@ -56,7 +67,7 @@ const normalizeHousehold = (household) => ({
   rsvpLocked: Boolean(household.rsvpLocked),
   guests: (household.guests || []).map((guest) => ({
     ...guest,
-    rsvpStatus: guest.rsvpStatus || 'Awaiting response',
+    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
     dietary: guest.dietary || 'None',
   })),
 })
@@ -107,6 +118,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [galleryError, setGalleryError] = useState('')
   const [hasDoodle, setHasDoodle] = useState(false)
   const [targetResponses, setTargetResponses] = useState([])
+  const [targetDietaries, setTargetDietaries] = useState([])
   const [targetNotes, setTargetNotes] = useState('')
   const [targetPlusOne, setTargetPlusOne] = useState(false)
   const [targetLocked, setTargetLocked] = useState(false)
@@ -166,6 +178,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         const guests = (household.guests || []).map((guest, index) => ({
           ...guest,
           rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
+          dietary: targetDietaries[index] || guest.dietary || 'None',
         }))
         const plusOneAccepted = household.plusOneAllowed ? targetPlusOne : false
         const anyAccepted = guests.some((guest) => guest.rsvpStatus === 'Accepted') || plusOneAccepted
@@ -304,6 +317,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   useEffect(() => {
     if (!householdMatch) return
     setTargetResponses((householdMatch.guests || []).map((guest) => guest.rsvpStatus || 'Awaiting response'))
+    setTargetDietaries((householdMatch.guests || []).map((guest) => guest.dietary || 'None'))
     setTargetPlusOne(Boolean(householdMatch.plusOneAccepted))
     setTargetNotes(householdMatch.notes || '')
     setTargetEmail(householdMatch.email || '')
@@ -531,24 +545,20 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       </section>
 
       <section id="rsvp" className="mx-auto mt-16 max-w-5xl rounded-2xl bg-white/80 p-10 text-charcoal shadow-frame backdrop-blur">
-        <div className="grid gap-10 md:grid-cols-[1.1fr,0.9fr]">
-          <div className="flex h-full flex-col">
-            <div>
-              <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
-              <h2 className="mt-4 font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
-              <p className="mt-4 text-sm text-charcoal/80">
-                We kindly request a response by April 30 so we can finalize guest counts.
-              </p>
-              <ul className="mt-6 space-y-3 text-sm text-charcoal/75">
-                <li>• Include the name that appears on your invitation.</li>
-                <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
-                <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
-              </ul>
-            </div>
-            {isDesktop && <div className="mt-10 w-full max-w-sm md:mt-auto md:pt-10">{renderDoodleArea('', 'max-w-sm')}</div>}
+        <div className="space-y-8">
+          <div className="space-y-4">
+            <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
+            <h2 className="font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
+            <p className="text-sm text-charcoal/80">We kindly request a response by April 30 so we can finalize guest counts.</p>
+            <ul className="space-y-3 text-sm text-charcoal/75">
+              <li>• Include the name that appears on your invitation.</li>
+              <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
+              <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
+            </ul>
           </div>
 
-          <div className="space-y-4">
+          <div className="grid gap-8 md:grid-cols-[1.6fr,1fr]">
+            <div className="space-y-4">
             {hasSubmitted && (
               <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
                 <p>
@@ -605,13 +615,22 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                       next[index] = value
                       return next
                     })
+                  const setDietary = (value) =>
+                    setTargetDietaries((prev) => {
+                      const next = [...prev]
+                      next[index] = value
+                      return next
+                    })
+                  const dietaryValue = targetDietaries[index] || 'None'
                   return (
                     <div key={guest.id} className="space-y-3 rounded-2xl border border-sage/20 bg-white/70 p-4 shadow-sm">
                       <p className="text-sm font-semibold text-sage-dark">{guest.name}, are you coming?</p>
                       <div className="flex flex-wrap gap-3 text-sm">
                         {[
-                          { value: 'Accepted', label: 'Obviously' },
-                          { value: 'Declined', label: '😢😢😢😢' },
+                          { value: 'Both events', label: 'Obviously (ceremony + reception)' },
+                          { value: 'Ceremony only', label: 'Ceremony only' },
+                          { value: 'Reception only', label: 'Reception only' },
+                          { value: 'Not attending', label: '😢😢😢😢 Neither' },
                         ].map((option) => {
                           const isActive = current === option.value
                           return (
@@ -630,6 +649,21 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                             </button>
                           )
                         })}
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Dietary preference</label>
+                        <select
+                          value={dietaryValue}
+                          onChange={(event) => setDietary(event.target.value)}
+                          disabled={targetLocked}
+                          className="mt-2 w-full rounded-xl border border-sage/30 bg-white/90 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
+                        >
+                          {dietaryOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   )
@@ -722,7 +756,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                           onChange={updateField('attendance')}
                           className="accent-sage"
                         />
-                        {value === 'yes' ? 'Obviously' : '😢😢😢😢'}
+                        {value === 'yes' ? 'Obviously' : '😢😢😢😢 Neither'}
                       </label>
                     ))}
                   </div>
@@ -797,6 +831,10 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 </div>
               </form>
             )}
+          </div>
+            <div className="space-y-4">
+              {renderDoodleArea('', 'max-w-sm mx-auto')}
+            </div>
           </div>
         </div>
       </section>

@@ -164,8 +164,8 @@ const seedHouseholds = [
   },
 ]
 
-const rsvpOptions = ['Awaiting response', 'Accepted', 'Declined', 'Tentative', 'Not offered']
-const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten free', 'Kosher style', 'Halal', 'Peanut allergy', 'Other']
+const rsvpOptions = ['Awaiting response', 'Both events', 'Ceremony only', 'Reception only', 'Not attending']
+const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
 const invitedByOptions = ['Bride', 'Groom', 'Both']
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
@@ -210,10 +210,21 @@ const ensureDerivedFields = (household) => ({
   rsvpLocked: Boolean(household.rsvpLocked),
   guests: (household.guests || []).map((guest) => ({
     ...guest,
-    rsvpStatus: guest.rsvpStatus || 'Awaiting response',
+    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
     dietary: guest.dietary || 'None',
   })),
 })
+
+const normalizeRsvpStatus = (status) => {
+  const value = (status || '').trim()
+  if (['Both events', 'Ceremony only', 'Reception only', 'Not attending', 'Awaiting response'].includes(value)) {
+    return value
+  }
+  if (value === 'Accepted') return 'Both events'
+  if (value === 'Declined') return 'Not attending'
+  if (value === 'Tentative' || value === 'Not offered') return 'Awaiting response'
+  return 'Awaiting response'
+}
 
 export const loadInitialHouseholds = () => {
   if (typeof window === 'undefined') return seedHouseholds.map(ensureDerivedFields)
@@ -338,12 +349,12 @@ export default function GuestListManager() {
     saveTimer.current = setTimeout(persistGuestList, 600)
   }
 
-  const stats = useMemo(() => {
-    const invitations = households.length
-    let guestCount = 0
-    let maxInvited = 0
-    let acceptedGuests = 0
-    let awaitingInvites = 0
+const stats = useMemo(() => {
+  const invitations = households.length
+  let guestCount = 0
+  let maxInvited = 0
+  let acceptedGuests = 0
+  let awaitingInvites = 0
 
     households.forEach((household) => {
       guestCount += household.guests.length
@@ -358,7 +369,7 @@ export default function GuestListManager() {
       }
 
       household.guests.forEach((guest) => {
-        if (guest.rsvpStatus === 'Accepted') {
+        if (['Both events', 'Ceremony only', 'Reception only'].includes(guest.rsvpStatus)) {
           acceptedGuests += 1
         }
       })
