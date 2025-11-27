@@ -173,6 +173,25 @@ const selectClass =
   'w-full rounded-lg border border-sage/30 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
 const inputClass =
   'w-full rounded-lg border border-sage/20 bg-white/90 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
+const filterInputClass =
+  'w-full rounded-lg border border-sage/25 bg-white px-2 py-1 text-xs shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
+
+const createDefaultFilters = () => ({
+  envelopeName: '',
+  invitedBy: 'all',
+  invitationSent: 'any',
+  saveTheDateSent: 'any',
+  plusOneAllowed: 'any',
+  plusOneAccepted: 'any',
+  rsvpStatus: 'all',
+  dietaryRestrictions: '',
+  table: '',
+  email: '',
+  phone: '',
+  address: '',
+})
+
+const toYesNo = (value) => (value ? 'Yes' : 'No')
 
 const blankHousehold = () => ({
   id: createId('household'),
@@ -252,8 +271,13 @@ export default function GuestListManager() {
   const [openMenuId, setOpenMenuId] = useState(null)
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [sortConfig, setSortConfig] = useState({ key: 'envelopeName', direction: 'asc' })
+  const [filters, setFilters] = useState(createDefaultFilters)
+  const [showFloatingAdd, setShowFloatingAdd] = useState(false)
   const saveTimer = useRef(null)
   const isSavingRef = useRef(false)
+  const exportMenuRef = useRef(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -318,6 +342,27 @@ export default function GuestListManager() {
     }
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return () => {}
+    const handleScroll = () => {
+      setShowFloatingAdd(window.scrollY > 280)
+    }
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return () => {}
+    const handleClickOutside = (event) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [])
+
   const persistGuestList = async () => {
     if (isSavingRef.current) return
     isSavingRef.current = true
@@ -349,19 +394,24 @@ export default function GuestListManager() {
     saveTimer.current = setTimeout(persistGuestList, 600)
   }
 
-const stats = useMemo(() => {
-  const invitations = households.length
-  let guestCount = 0
-  let maxInvited = 0
-  let acceptedGuests = 0
-  let awaitingInvites = 0
+  const stats = useMemo(() => {
+    const invitations = households.length
+    let guestCount = 0
+    let maxInvited = 0
+    let acceptedGuests = 0
+    let awaitingInvites = 0
+    const maxBreakdown = { Bride: 0, Groom: 0, Both: 0, Other: 0 }
 
     households.forEach((household) => {
       guestCount += household.guests.length
 
       const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
       const plusOneSlot = household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0
-      maxInvited += household.guests.length + plusOneSlot
+      const householdMax = household.guests.length + plusOneSlot
+      maxInvited += householdMax
+
+      const inviterKey = invitedByOptions.includes(household.invitedBy) ? household.invitedBy : 'Other'
+      maxBreakdown[inviterKey] = (maxBreakdown[inviterKey] || 0) + householdMax
 
       const allAwaiting = household.invitationSent && household.guests.every((guest) => guest.rsvpStatus === 'Awaiting response')
       if (allAwaiting) {
@@ -379,7 +429,7 @@ const stats = useMemo(() => {
       }
     })
 
-    return { invitations, guestCount, maxInvited, acceptedGuests, awaitingInvites }
+    return { invitations, guestCount, maxInvited, acceptedGuests, awaitingInvites, maxBreakdown }
   }, [households])
 
 
@@ -409,6 +459,38 @@ const stats = useMemo(() => {
         console.warn('Unable to clear guest list auth flag', error)
       }
     }
+  }
+
+  const toggleSort = (key) => {
+    setSortConfig((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      }
+      return { key, direction: 'asc' }
+    })
+  }
+
+  const handleFilterChange = (field, value) => {
+    setFilters((prev) => ({ ...prev, [field]: value }))
+  }
+
+  const resetFilters = () => {
+    setFilters(createDefaultFilters())
+  }
+
+  const renderSortIcon = (columnKey) => {
+    const active = sortConfig.key === columnKey
+    const directionClass = active && sortConfig.direction === 'asc' ? '-rotate-180' : ''
+    return (
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className={`h-3 w-3 transition ${directionClass} ${active ? 'text-sage-dark' : 'text-sage-dark/40 group-hover:text-sage-dark/70'}`}
+      >
+        <path d="M5 8l5 5 5-5H5z" />
+      </svg>
+    )
   }
 
   const updateHousehold = (id, updates) => {
@@ -510,7 +592,84 @@ const stats = useMemo(() => {
     setExpandedHouseholds(new Set())
   }
 
-  const exportCsv = () => {
+  const visibleHouseholds = useMemo(() => {
+    const textIncludes = (value, query) => String(value || '').toLowerCase().includes(String(query || '').toLowerCase())
+    const boolMatches = (value, filterValue) =>
+      filterValue === 'any' ? true : filterValue === 'yes' ? Boolean(value) : !value
+    const filtered = households.filter((household) => {
+      if (filters.envelopeName && !textIncludes(household.envelopeName, filters.envelopeName)) return false
+      if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
+      if (!boolMatches(household.invitationSent, filters.invitationSent)) return false
+      if (!boolMatches(household.saveTheDateSent, filters.saveTheDateSent)) return false
+      if (!boolMatches(household.plusOneAllowed, filters.plusOneAllowed)) return false
+      if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
+      if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
+      if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
+      if (filters.table && !textIncludes(household.table, filters.table)) return false
+      if (filters.email && !textIncludes(household.email, filters.email)) return false
+      if (filters.phone && !textIncludes(household.phone, filters.phone)) return false
+      const addressText = `${household.address.line1} ${household.address.city} ${household.address.state} ${household.address.postalCode} ${household.address.country}`
+      if (filters.address && !textIncludes(addressText, filters.address)) return false
+      return true
+    })
+
+    const { key, direction } = sortConfig || {}
+    if (!key || !direction) return filtered
+
+    const sorted = [...filtered].sort((a, b) => {
+      const directionFactor = direction === 'desc' ? -1 : 1
+      const valueMap = (household) => {
+        switch (key) {
+          case 'invitationSent':
+          case 'saveTheDateSent':
+          case 'plusOneAllowed':
+          case 'plusOneAccepted':
+            return household[key] ? 1 : 0
+          case 'address':
+            return `${household.address.line1} ${household.address.city} ${household.address.state} ${household.address.postalCode} ${household.address.country}`.trim()
+          default:
+            return household[key] ?? ''
+        }
+      }
+
+      const normalizeValue = (val) => (typeof val === 'string' ? val.toLowerCase() : val)
+
+      const valueA = normalizeValue(valueMap(a))
+      const valueB = normalizeValue(valueMap(b))
+      if (typeof valueA === 'number' && typeof valueB === 'number') {
+        return (valueA - valueB) * directionFactor
+      }
+      return String(valueA).localeCompare(String(valueB)) * directionFactor
+    })
+
+    return sorted
+  }, [filters, households, sortConfig])
+
+  const downloadCsv = (headers, rows, filename) => {
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((cell) => {
+            const value = cell ?? ''
+            const escaped = String(value).replace(/"/g, '""')
+            return `"${escaped}"`
+          })
+          .join(','),
+      )
+      .join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const exportHouseholdCsv = () => {
     const headers = [
       'Household',
       'Invited By',
@@ -528,21 +687,21 @@ const stats = useMemo(() => {
       'State',
       'Postal Code',
       'Country',
-      'Guest Name',
-      'Guest Role',
-      'Guest RSVP',
-      'Guest Dietary',
+      'Guest Count (incl. +1 slot)',
+      'Notes',
     ]
 
-    const rows = []
-    households.forEach((household) => {
-      const base = [
+    const rows = households.map((household) => {
+      const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
+      const plusOneSlot = household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0
+      const guestCount = household.guests.length + plusOneSlot
+      return [
         household.envelopeName,
         household.invitedBy,
-        household.invitationSent ? 'Yes' : 'No',
-        household.saveTheDateSent ? 'Yes' : 'No',
-        household.plusOneAllowed ? 'Yes' : 'No',
-        household.plusOneAccepted ? 'Yes' : 'No',
+        toYesNo(household.invitationSent),
+        toYesNo(household.saveTheDateSent),
+        toYesNo(household.plusOneAllowed),
+        toYesNo(household.plusOneAccepted),
         household.rsvpStatus,
         household.dietaryRestrictions,
         household.table,
@@ -553,38 +712,91 @@ const stats = useMemo(() => {
         household.address.state,
         household.address.postalCode,
         household.address.country,
+        guestCount,
+        household.notes || '',
       ]
-
-      if (household.guests.length === 0) {
-        rows.push([...base, '', '', ''])
-      } else {
-        household.guests.forEach((guest) => {
-          rows.push([...base, guest.name, guest.role || '', guest.rsvpStatus, guest.dietary])
-        })
-      }
     })
 
-    const csvContent = [headers, ...rows]
-      .map((row) =>
-        row
-          .map((cell) => {
-            const value = cell ?? ''
-            const escaped = String(value).replace(/"/g, '""')
-            return `"${escaped}"`
-          })
-          .join(','),
-      )
-      .join('\n')
+    downloadCsv(headers, rows, 'guest-list-households.csv')
+  }
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'guest-list.csv'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+  const exportGuestCsv = () => {
+    const headers = [
+      'Household',
+      'Guest Name',
+      'Guest Role',
+      'Guest Type',
+      'Guest RSVP',
+      'Guest Dietary',
+      'Invited By',
+      'Invitation Sent',
+      'Save The Date Sent',
+      'Plus One Allowed',
+      'Plus One Accepted',
+      'Table',
+      'Email',
+      'Phone',
+      'Address',
+      'City',
+      'State',
+      'Postal Code',
+      'Country',
+      'Notes',
+    ]
+
+    const rows = households.flatMap((household) => {
+      if (!household.guests || household.guests.length === 0) {
+        return [
+          [
+            household.envelopeName,
+            '',
+            '',
+            '',
+            '',
+            '',
+            household.invitedBy,
+            toYesNo(household.invitationSent),
+            toYesNo(household.saveTheDateSent),
+            toYesNo(household.plusOneAllowed),
+            toYesNo(household.plusOneAccepted),
+            household.table,
+            household.email,
+            household.phone,
+            household.address.line1,
+            household.address.city,
+            household.address.state,
+            household.address.postalCode,
+            household.address.country,
+            household.notes || '',
+          ],
+        ]
+      }
+
+      return household.guests.map((guest) => [
+        household.envelopeName,
+        guest.name,
+        guest.role || '',
+        guest.type || '',
+        guest.rsvpStatus,
+        guest.dietary,
+        household.invitedBy,
+        toYesNo(household.invitationSent),
+        toYesNo(household.saveTheDateSent),
+        toYesNo(household.plusOneAllowed),
+        toYesNo(household.plusOneAccepted),
+        household.table,
+        household.email,
+        household.phone,
+        household.address.line1,
+        household.address.city,
+        household.address.state,
+        household.address.postalCode,
+        household.address.country,
+        household.notes || '',
+      ])
+    })
+
+    downloadCsv(headers, rows, 'guest-list-guests.csv')
   }
 
   const addHousehold = () => {
@@ -670,8 +882,17 @@ const stats = useMemo(() => {
       </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border border-sage/30 bg-white/80 p-4 shadow-frame">
+          <p className="text-sm font-semibold text-sage-dark/80">Max invited</p>
+          <p className="mt-1 font-serif text-4xl text-sage-dark">{stats.maxInvited}</p>
+          <p className="text-sm text-charcoal/70">Guests incl. allowed +1s</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-sage-dark/80">
+            <span className="rounded-full bg-sage/15 px-2 py-1">Groom: {stats.maxBreakdown.Groom || 0}</span>
+            <span className="rounded-full bg-sage/15 px-2 py-1">Bride: {stats.maxBreakdown.Bride || 0}</span>
+            <span className="rounded-full bg-sage/15 px-2 py-1">Both: {stats.maxBreakdown.Both || 0}</span>
+          </div>
+        </div>
         {[
-          { label: 'Max invited', value: stats.maxInvited, sub: 'Guests incl. allowed +1s' },
           { label: 'Invitations', value: stats.invitations, sub: 'Households / singletons' },
           { label: 'Awaiting', value: stats.awaitingInvites, sub: 'Invites sent with no RSVP' },
           { label: 'Accepted', value: stats.acceptedGuests, sub: 'Guests marked Accepted' },
@@ -707,38 +928,262 @@ const stats = useMemo(() => {
             </button>
             <button
               type="button"
-              onClick={exportCsv}
-              className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+              onClick={resetFilters}
+              className="rounded-full border border-sage/40 px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
             >
-              Export CSV
+              Clear filters
             </button>
+            <div className="relative z-30" ref={exportMenuRef}>
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen((open) => !open)}
+                className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+              >
+                Export
+              </button>
+              {exportMenuOpen && (
+                <div className="absolute right-0 z-40 mt-2 w-48 rounded-xl border border-sage/30 bg-white p-2 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      exportHouseholdCsv()
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
+                  >
+                    Export households
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      exportGuestCsv()
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
+                  >
+                    Export all guests
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1900px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
-                <th className="px-3 py-3 w-[260px] min-w-[240px]">Name</th>
-                <th className="px-3 py-3 w-[150px]">Invited by</th>
-                <th className="px-3 py-3 w-[150px]">Invite sent</th>
-                <th className="px-3 py-3 w-[160px]">Save the date</th>
-                <th className="px-3 py-3 w-[160px]">+1 allowed</th>
-                <th className="px-3 py-3 w-[170px]">+1 accepted</th>
-                <th className="px-3 py-3 w-[190px]">RSVP</th>
-                <th className="px-3 py-3 w-[190px]">Dietary</th>
-                <th className="px-3 py-3 w-[150px]">Table</th>
-                <th className="px-3 py-3 w-[260px]">Email</th>
-                <th className="px-3 py-3 w-[170px]">Phone</th>
-                <th className="px-3 py-3 w-[420px]">Address</th>
+                <th className="px-3 py-3 w-[260px] min-w-[240px]">
+                  <button type="button" onClick={() => toggleSort('envelopeName')} className="group flex items-center gap-2">
+                    <span>Name</span>
+                    {renderSortIcon('envelopeName')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[150px]">
+                  <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
+                    <span>Invited by</span>
+                    {renderSortIcon('invitedBy')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[150px]">
+                  <button type="button" onClick={() => toggleSort('invitationSent')} className="group flex items-center gap-2">
+                    <span>Invite sent</span>
+                    {renderSortIcon('invitationSent')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[160px]">
+                  <button type="button" onClick={() => toggleSort('saveTheDateSent')} className="group flex items-center gap-2">
+                    <span>Save the date</span>
+                    {renderSortIcon('saveTheDateSent')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[160px]">
+                  <button type="button" onClick={() => toggleSort('plusOneAllowed')} className="group flex items-center gap-2">
+                    <span>+1 allowed</span>
+                    {renderSortIcon('plusOneAllowed')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[170px]">
+                  <button type="button" onClick={() => toggleSort('plusOneAccepted')} className="group flex items-center gap-2">
+                    <span>+1 accepted</span>
+                    {renderSortIcon('plusOneAccepted')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[190px]">
+                  <button type="button" onClick={() => toggleSort('rsvpStatus')} className="group flex items-center gap-2">
+                    <span>RSVP</span>
+                    {renderSortIcon('rsvpStatus')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[190px]">
+                  <button type="button" onClick={() => toggleSort('dietaryRestrictions')} className="group flex items-center gap-2">
+                    <span>Dietary</span>
+                    {renderSortIcon('dietaryRestrictions')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[150px]">
+                  <button type="button" onClick={() => toggleSort('table')} className="group flex items-center gap-2">
+                    <span>Table</span>
+                    {renderSortIcon('table')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[260px]">
+                  <button type="button" onClick={() => toggleSort('email')} className="group flex items-center gap-2">
+                    <span>Email</span>
+                    {renderSortIcon('email')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[170px]">
+                  <button type="button" onClick={() => toggleSort('phone')} className="group flex items-center gap-2">
+                    <span>Phone</span>
+                    {renderSortIcon('phone')}
+                  </button>
+                </th>
+                <th className="px-3 py-3 w-[420px]">
+                  <button type="button" onClick={() => toggleSort('address')} className="group flex items-center gap-2">
+                    <span>Address</span>
+                    {renderSortIcon('address')}
+                  </button>
+                </th>
                 <th className="sticky right-0 px-3 py-3 w-[110px] text-right bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                   Menu
                 </th>
               </tr>
+              <tr className="text-xs text-sage-dark/80">
+                <th className="px-3 pb-3 w-[260px] min-w-[240px]">
+                  <input
+                    type="text"
+                    value={filters.envelopeName}
+                    onChange={(event) => handleFilterChange('envelopeName', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Search household"
+                  />
+                </th>
+                <th className="px-3 pb-3 w-[150px]">
+                  <select
+                    value={filters.invitedBy}
+                    onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="all">All</option>
+                    {invitedByOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[150px]">
+                  <select
+                    value={filters.invitationSent}
+                    onChange={(event) => handleFilterChange('invitationSent', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="any">Any</option>
+                    <option value="yes">Sent</option>
+                    <option value="no">Not sent</option>
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[160px]">
+                  <select
+                    value={filters.saveTheDateSent}
+                    onChange={(event) => handleFilterChange('saveTheDateSent', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="any">Any</option>
+                    <option value="yes">Sent</option>
+                    <option value="no">Not sent</option>
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[160px]">
+                  <select
+                    value={filters.plusOneAllowed}
+                    onChange={(event) => handleFilterChange('plusOneAllowed', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="any">Any</option>
+                    <option value="yes">Allowed</option>
+                    <option value="no">Not allowed</option>
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[170px]">
+                  <select
+                    value={filters.plusOneAccepted}
+                    onChange={(event) => handleFilterChange('plusOneAccepted', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="any">Any</option>
+                    <option value="yes">Accepted</option>
+                    <option value="no">Not accepted</option>
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[190px]">
+                  <select
+                    value={filters.rsvpStatus}
+                    onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+                    className={filterInputClass}
+                  >
+                    <option value="all">All</option>
+                    {rsvpOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-3 pb-3 w-[190px]">
+                  <input
+                    type="text"
+                    value={filters.dietaryRestrictions}
+                    onChange={(event) => handleFilterChange('dietaryRestrictions', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Filter dietary"
+                  />
+                </th>
+                <th className="px-3 pb-3 w-[150px]">
+                  <input
+                    type="text"
+                    value={filters.table}
+                    onChange={(event) => handleFilterChange('table', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Table"
+                  />
+                </th>
+                <th className="px-3 pb-3 w-[260px]">
+                  <input
+                    type="text"
+                    value={filters.email}
+                    onChange={(event) => handleFilterChange('email', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Email"
+                  />
+                </th>
+                <th className="px-3 pb-3 w-[170px]">
+                  <input
+                    type="text"
+                    value={filters.phone}
+                    onChange={(event) => handleFilterChange('phone', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Phone"
+                  />
+                </th>
+                <th className="px-3 pb-3 w-[420px]">
+                  <input
+                    type="text"
+                    value={filters.address}
+                    onChange={(event) => handleFilterChange('address', event.target.value)}
+                    className={filterInputClass}
+                    placeholder="Address search"
+                  />
+                </th>
+                <th className="sticky right-0 px-3 pb-3 w-[110px] bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20" />
+              </tr>
             </thead>
             <tbody className="divide-y divide-sage/20">
-              {households.map((household) => {
+              {visibleHouseholds.map((household) => {
                 const isExpanded = expandedHouseholds.has(household.id)
                 const locked = household.rsvpLocked
+                const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
+                const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
                 return (
                   <Fragment key={household.id}>
                     <tr className="relative z-10 bg-white shadow-lg shadow-sage/25">
@@ -750,8 +1195,20 @@ const stats = useMemo(() => {
                             className="flex h-7 w-7 items-center justify-center rounded-full border border-sage/40 bg-white text-sage-dark shadow-sm transition hover:border-sage"
                             aria-label={isExpanded ? 'Collapse household' : 'Expand household'}
                           >
-                            {isExpanded ? '−' : '+'}
+                            <svg
+                              aria-hidden="true"
+                              viewBox="0 0 20 20"
+                              fill="none"
+                              className={`h-4 w-4 transition ${isExpanded ? 'rotate-180' : ''}`}
+                            >
+                              <path d="M5 8l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
                           </button>
+                          {!isExpanded && (
+                            <span className="whitespace-nowrap rounded-full bg-sage/15 px-2 py-1 text-[0.75rem] font-semibold text-sage-dark">
+                              {guestCount} guest{guestCount === 1 ? '' : 's'}
+                            </span>
+                          )}
                           <div className="flex-1">
                             <input
                               type="text"
@@ -963,7 +1420,7 @@ const stats = useMemo(() => {
 
                     {isExpanded &&
                       household.guests.map((guest) => (
-                        <tr key={`${household.id}-${guest.id}`} className="bg-sage/10">
+                          <tr key={`${household.id}-${guest.id}`} className="bg-sage/10">
                           <td className="px-3 py-3 pl-10 w-[260px]">
                             <input
                               type="text"
@@ -1026,10 +1483,28 @@ const stats = useMemo(() => {
                   </Fragment>
                 )
               })}
+              {visibleHouseholds.length === 0 && (
+                <tr>
+                  <td colSpan={13} className="px-3 py-6 text-center text-sm text-charcoal/70">
+                    No households match the current filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+      {showFloatingAdd && (
+        <button
+          type="button"
+          onClick={addHousehold}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-sage px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-sage/40 transition hover:bg-sage-dark"
+          aria-label="Add invite"
+        >
+          +
+          <span className="hidden sm:inline">Add invite</span>
+        </button>
+      )}
     </main>
   )
 }

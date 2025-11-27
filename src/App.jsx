@@ -136,6 +136,13 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     setFormData((prev) => ({ ...prev, [field]: event.target.value }))
   }
 
+  const toggleChoice = (field, value) => () => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: prev[field] === value ? '' : value,
+    }))
+  }
+
   const rememberSubmissionFlag = () => {
     try {
       window.localStorage.setItem(RSVP_STORAGE_KEY, 'true')
@@ -745,40 +752,50 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
 
                 <fieldset className="space-y-3">
                   <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Will you attend?</legend>
-                  <div className="flex gap-4 text-sm">
-                    {['yes', 'no'].map((value) => (
-                      <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
-                        <input
-                          type="radio"
-                          name="attendance"
-                          value={value}
-                          checked={formData.attendance === value}
-                          onChange={updateField('attendance')}
-                          className="accent-sage"
-                        />
-                        {value === 'yes' ? 'Obviously' : '😢😢😢😢 Neither'}
-                      </label>
-                    ))}
+                  <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Attendance">
+                    {['yes', 'no'].map((value) => {
+                      const selected = formData.attendance === value
+                      return (
+                        <button
+                          type="button"
+                          key={value}
+                          onClick={toggleChoice('attendance', value)}
+                          role="radio"
+                          aria-checked={selected}
+                          className={`flex items-center gap-2 rounded-full border px-4 py-2 transition ${
+                            selected ? 'border-sage bg-sage/15 text-sage-dark shadow-sm' : 'border-sage/30 hover:border-sage/60'
+                          }`}
+                        >
+                          <span className={`inline-block h-3 w-3 rounded-full border ${selected ? 'border-sage bg-sage' : 'border-sage/40'}`} />
+                          {value === 'yes' ? 'Obviously' : '😢😢😢😢 Neither'}
+                        </button>
+                      )
+                    })}
                   </div>
                 </fieldset>
 
                 {isAttending && (
                   <fieldset className="space-y-3">
                     <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Bringing a plus one?</legend>
-                    <div className="flex gap-4 text-sm">
-                      {['no', 'yes'].map((value) => (
-                        <label key={value} className="flex items-center gap-2 rounded-full border border-sage/30 px-4 py-2">
-                          <input
-                            type="radio"
-                            name="bringingGuest"
-                            value={value}
-                            checked={formData.bringingGuest === value}
-                            onChange={updateField('bringingGuest')}
-                            className="accent-sage"
-                          />
-                          {value === 'yes' ? 'Yes, noted on invite' : 'No, just me'}
-                        </label>
-                      ))}
+                    <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Plus one">
+                      {['no', 'yes'].map((value) => {
+                        const selected = formData.bringingGuest === value
+                        return (
+                          <button
+                            type="button"
+                            key={value}
+                            onClick={toggleChoice('bringingGuest', value)}
+                            role="radio"
+                            aria-checked={selected}
+                            className={`flex items-center gap-2 rounded-full border px-4 py-2 transition ${
+                              selected ? 'border-sage bg-sage/15 text-sage-dark shadow-sm' : 'border-sage/30 hover:border-sage/60'
+                            }`}
+                          >
+                            <span className={`inline-block h-3 w-3 rounded-full border ${selected ? 'border-sage bg-sage' : 'border-sage/40'}`} />
+                            {value === 'yes' ? 'Yes, noted on invite' : 'No, just me'}
+                          </button>
+                        )
+                      })}
                     </div>
                   </fieldset>
                 )}
