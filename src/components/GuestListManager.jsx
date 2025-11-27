@@ -175,6 +175,18 @@ const inputClass =
   'w-full rounded-lg border border-sage/20 bg-white/90 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
 const filterInputClass =
   'w-full rounded-lg border border-sage/25 bg-white px-2 py-1 text-xs shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
+const tableInputClass = `${inputClass} h-9 py-1 text-xs`
+const tableSelectClass = `${selectClass} h-9 py-1 text-xs`
+const animationStyles = `
+@keyframes guestRowFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes householdPulse {
+  0% { box-shadow: 0 8px 18px -8px rgba(71, 85, 60, 0.18); }
+  100% { box-shadow: 0 12px 28px -10px rgba(71, 85, 60, 0.28); }
+}
+`
 
 const createDefaultFilters = () => ({
   envelopeName: '',
@@ -192,6 +204,10 @@ const createDefaultFilters = () => ({
 })
 
 const toYesNo = (value) => (value ? 'Yes' : 'No')
+const formatAddress = (address = {}) => {
+  const parts = [address.line1, address.city, address.state, address.postalCode, address.country].filter(Boolean)
+  return parts.join(', ') || 'No address yet'
+}
 
 const blankHousehold = () => ({
   id: createId('household'),
@@ -275,6 +291,8 @@ export default function GuestListManager() {
   const [sortConfig, setSortConfig] = useState({ key: 'envelopeName', direction: 'asc' })
   const [filters, setFilters] = useState(createDefaultFilters)
   const [showFloatingAdd, setShowFloatingAdd] = useState(false)
+  const [draftHousehold, setDraftHousehold] = useState(null)
+  const [addressModalId, setAddressModalId] = useState(null)
   const saveTimer = useRef(null)
   const isSavingRef = useRef(false)
   const exportMenuRef = useRef(null)
@@ -431,6 +449,11 @@ export default function GuestListManager() {
 
     return { invitations, guestCount, maxInvited, acceptedGuests, awaitingInvites, maxBreakdown }
   }, [households])
+
+  const addressModalHousehold = useMemo(
+    () => households.find((household) => household.id === addressModalId) || null,
+    [addressModalId, households],
+  )
 
 
   const handleAuth = (event) => {
@@ -799,8 +822,7 @@ export default function GuestListManager() {
     downloadCsv(headers, rows, 'guest-list-guests.csv')
   }
 
-  const addHousehold = () => {
-    const nextHousehold = blankHousehold()
+  const insertHousehold = (nextHousehold) => {
     setHouseholds((prev) => [...prev, nextHousehold])
     setExpandedHouseholds((prev) => {
       const next = new Set(prev)
@@ -811,9 +833,52 @@ export default function GuestListManager() {
     queuePersist()
   }
 
+  const startNewHouseholdDraft = () => {
+    const nextHousehold = blankHousehold()
+    setOpenMenuId(null)
+    setDraftHousehold(nextHousehold)
+    setTimeout(() => {
+      const panel = document.getElementById('draft-household-panel')
+      panel?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 10)
+  }
+
+  const updateDraftField = (field, value) => {
+    setDraftHousehold((prev) => (prev ? { ...prev, [field]: value } : prev))
+  }
+
+  const updateDraftAddressField = (field, value) => {
+    setDraftHousehold((prev) => (prev ? { ...prev, address: { ...prev.address, [field]: value } } : prev))
+  }
+
+  const updateDraftGuest = (guestId, updates) => {
+    setDraftHousehold((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        guests: prev.guests.map((guest) => (guest.id === guestId ? { ...guest, ...updates } : guest)),
+      }
+    })
+  }
+
+  const confirmDraftHousehold = () => {
+    if (!draftHousehold) return
+    const withSlug = {
+      ...draftHousehold,
+      slug: slugify(draftHousehold.envelopeName || 'New household'),
+    }
+    insertHousehold(withSlug)
+    setDraftHousehold(null)
+  }
+
+  const cancelDraftHousehold = () => {
+    setDraftHousehold(null)
+  }
+
   if (!isAuthorized) {
     return (
       <main className="mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center px-4 text-charcoal">
+        <style>{animationStyles}</style>
         <div className="w-full space-y-6 rounded-3xl border border-sage/30 bg-white/80 p-8 shadow-frame backdrop-blur">
           <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Guest list</p>
           <div className="space-y-2">
@@ -842,26 +907,27 @@ export default function GuestListManager() {
               Unlock guest list
             </button>
           </form>
-        </div>
-      </main>
-    )
+      </div>
+    </main>
+  )
   }
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-screen-2xl px-4 py-10 text-charcoal">
+      <style>{animationStyles}</style>
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm font-semibold text-sage-dark">Guest list</p>
           <h1 className="mt-1 font-serif text-4xl text-sage-dark">Wedding guest manager</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={addHousehold}
-            className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
-          >
-            Add invite
-          </button>
+            <button
+              type="button"
+              onClick={startNewHouseholdDraft}
+              className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+            >
+              Add invite
+            </button>
           <button
             type="button"
             onClick={handleLock}
@@ -972,84 +1038,84 @@ export default function GuestListManager() {
           <table className="min-w-[1900px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
-                <th className="px-3 py-3 w-[260px] min-w-[240px]">
+                <th className="sticky left-0 z-40 px-3 py-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.08)]">
                   <button type="button" onClick={() => toggleSort('envelopeName')} className="group flex items-center gap-2">
                     <span>Name</span>
                     {renderSortIcon('envelopeName')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[150px]">
+                <th className="px-3 py-2 w-[150px]">
                   <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
                     <span>Invited by</span>
                     {renderSortIcon('invitedBy')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[150px]">
+                <th className="px-3 py-2 w-[150px]">
                   <button type="button" onClick={() => toggleSort('invitationSent')} className="group flex items-center gap-2">
                     <span>Invite sent</span>
                     {renderSortIcon('invitationSent')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[160px]">
+                <th className="px-3 py-2 w-[160px]">
                   <button type="button" onClick={() => toggleSort('saveTheDateSent')} className="group flex items-center gap-2">
                     <span>Save the date</span>
                     {renderSortIcon('saveTheDateSent')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[160px]">
+                <th className="px-3 py-2 w-[160px]">
                   <button type="button" onClick={() => toggleSort('plusOneAllowed')} className="group flex items-center gap-2">
                     <span>+1 allowed</span>
                     {renderSortIcon('plusOneAllowed')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[170px]">
+                <th className="px-3 py-2 w-[170px]">
                   <button type="button" onClick={() => toggleSort('plusOneAccepted')} className="group flex items-center gap-2">
                     <span>+1 accepted</span>
                     {renderSortIcon('plusOneAccepted')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[190px]">
+                <th className="px-3 py-2 w-[190px]">
                   <button type="button" onClick={() => toggleSort('rsvpStatus')} className="group flex items-center gap-2">
                     <span>RSVP</span>
                     {renderSortIcon('rsvpStatus')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[190px]">
+                <th className="px-3 py-2 w-[190px]">
                   <button type="button" onClick={() => toggleSort('dietaryRestrictions')} className="group flex items-center gap-2">
                     <span>Dietary</span>
                     {renderSortIcon('dietaryRestrictions')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[150px]">
+                <th className="px-3 py-2 w-[150px]">
                   <button type="button" onClick={() => toggleSort('table')} className="group flex items-center gap-2">
                     <span>Table</span>
                     {renderSortIcon('table')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[260px]">
+                <th className="px-3 py-2 w-[260px]">
                   <button type="button" onClick={() => toggleSort('email')} className="group flex items-center gap-2">
                     <span>Email</span>
                     {renderSortIcon('email')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[170px]">
+                <th className="px-3 py-2 w-[170px]">
                   <button type="button" onClick={() => toggleSort('phone')} className="group flex items-center gap-2">
                     <span>Phone</span>
                     {renderSortIcon('phone')}
                   </button>
                 </th>
-                <th className="px-3 py-3 w-[420px]">
+                <th className="px-3 py-2 w-[420px]">
                   <button type="button" onClick={() => toggleSort('address')} className="group flex items-center gap-2">
                     <span>Address</span>
                     {renderSortIcon('address')}
                   </button>
                 </th>
-                <th className="sticky right-0 px-3 py-3 w-[110px] text-right bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
+                <th className="sticky right-0 px-3 py-2 w-[110px] text-right bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                   Menu
                 </th>
               </tr>
               <tr className="text-xs text-sage-dark/80">
-                <th className="px-3 pb-3 w-[260px] min-w-[240px]">
+                <th className="sticky left-0 z-20 px-3 pb-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]">
                   <input
                     type="text"
                     value={filters.envelopeName}
@@ -1058,7 +1124,7 @@ export default function GuestListManager() {
                     placeholder="Search household"
                   />
                 </th>
-                <th className="px-3 pb-3 w-[150px]">
+                <th className="px-3 pb-2 w-[150px]">
                   <select
                     value={filters.invitedBy}
                     onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
@@ -1072,7 +1138,7 @@ export default function GuestListManager() {
                     ))}
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[150px]">
+                <th className="px-3 pb-2 w-[150px]">
                   <select
                     value={filters.invitationSent}
                     onChange={(event) => handleFilterChange('invitationSent', event.target.value)}
@@ -1083,7 +1149,7 @@ export default function GuestListManager() {
                     <option value="no">Not sent</option>
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[160px]">
+                <th className="px-3 pb-2 w-[160px]">
                   <select
                     value={filters.saveTheDateSent}
                     onChange={(event) => handleFilterChange('saveTheDateSent', event.target.value)}
@@ -1094,7 +1160,7 @@ export default function GuestListManager() {
                     <option value="no">Not sent</option>
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[160px]">
+                <th className="px-3 pb-2 w-[160px]">
                   <select
                     value={filters.plusOneAllowed}
                     onChange={(event) => handleFilterChange('plusOneAllowed', event.target.value)}
@@ -1105,7 +1171,7 @@ export default function GuestListManager() {
                     <option value="no">Not allowed</option>
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[170px]">
+                <th className="px-3 pb-2 w-[170px]">
                   <select
                     value={filters.plusOneAccepted}
                     onChange={(event) => handleFilterChange('plusOneAccepted', event.target.value)}
@@ -1116,7 +1182,7 @@ export default function GuestListManager() {
                     <option value="no">Not accepted</option>
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[190px]">
+                <th className="px-3 pb-2 w-[190px]">
                   <select
                     value={filters.rsvpStatus}
                     onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
@@ -1130,7 +1196,7 @@ export default function GuestListManager() {
                     ))}
                   </select>
                 </th>
-                <th className="px-3 pb-3 w-[190px]">
+                <th className="px-3 pb-2 w-[190px]">
                   <input
                     type="text"
                     value={filters.dietaryRestrictions}
@@ -1139,7 +1205,7 @@ export default function GuestListManager() {
                     placeholder="Filter dietary"
                   />
                 </th>
-                <th className="px-3 pb-3 w-[150px]">
+                <th className="px-3 pb-2 w-[150px]">
                   <input
                     type="text"
                     value={filters.table}
@@ -1148,7 +1214,7 @@ export default function GuestListManager() {
                     placeholder="Table"
                   />
                 </th>
-                <th className="px-3 pb-3 w-[260px]">
+                <th className="px-3 pb-2 w-[260px]">
                   <input
                     type="text"
                     value={filters.email}
@@ -1157,7 +1223,7 @@ export default function GuestListManager() {
                     placeholder="Email"
                   />
                 </th>
-                <th className="px-3 pb-3 w-[170px]">
+                <th className="px-3 pb-2 w-[170px]">
                   <input
                     type="text"
                     value={filters.phone}
@@ -1166,7 +1232,7 @@ export default function GuestListManager() {
                     placeholder="Phone"
                   />
                 </th>
-                <th className="px-3 pb-3 w-[420px]">
+                <th className="px-3 pb-2 w-[420px]">
                   <input
                     type="text"
                     value={filters.address}
@@ -1175,7 +1241,7 @@ export default function GuestListManager() {
                     placeholder="Address search"
                   />
                 </th>
-                <th className="sticky right-0 px-3 pb-3 w-[110px] bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20" />
+                <th className="sticky right-0 px-3 pb-2 w-[110px] bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20" />
               </tr>
             </thead>
             <tbody className="divide-y divide-sage/20">
@@ -1186,8 +1252,13 @@ export default function GuestListManager() {
                 const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
                 return (
                   <Fragment key={household.id}>
-                    <tr className="relative z-10 bg-white shadow-lg shadow-sage/25">
-                      <td className="px-3 py-3 w-[260px]">
+                    <tr
+                      className={`relative z-10 bg-white shadow-lg shadow-sage/25 transition duration-200 ${
+                        isExpanded ? 'ring-1 ring-sage/15' : ''
+                      }`}
+                      style={isExpanded ? { animation: 'householdPulse 180ms ease-out' } : undefined}
+                    >
+                      <td className="sticky left-0 z-10 px-3 py-2 w-[260px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]">
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -1214,7 +1285,7 @@ export default function GuestListManager() {
                               type="text"
                               value={household.envelopeName}
                               onChange={(event) => updateHousehold(household.id, { envelopeName: event.target.value })}
-                              className={inputClass}
+                              className={tableInputClass}
                               placeholder="Household name"
                             />
                             {locked && (
@@ -1223,11 +1294,11 @@ export default function GuestListManager() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-3 w-[150px]">
+                      <td className="px-3 py-2 w-[150px]">
                         <select
                           value={household.invitedBy}
                           onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
-                          className={selectClass}
+                          className={tableSelectClass}
                         >
                           {invitedByOptions.map((option) => (
                             <option key={option} value={option}>
@@ -1236,7 +1307,7 @@ export default function GuestListManager() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-3 py-3 w-[150px]">
+                      <td className="px-3 py-2 w-[150px]">
                         <label className="flex items-center gap-2 text-sm text-charcoal/80">
                           <input
                             type="checkbox"
@@ -1247,7 +1318,7 @@ export default function GuestListManager() {
                           Sent
                         </label>
                       </td>
-                      <td className="px-3 py-3 w-[160px]">
+                      <td className="px-3 py-2 w-[160px]">
                         <label className="flex items-center gap-2 text-sm text-charcoal/80">
                           <input
                             type="checkbox"
@@ -1258,7 +1329,7 @@ export default function GuestListManager() {
                           Sent
                         </label>
                       </td>
-                      <td className="px-3 py-3 w-[160px]">
+                      <td className="px-3 py-2 w-[160px]">
                         <label className="flex items-center gap-2 text-sm text-charcoal/80">
                           <input
                             type="checkbox"
@@ -1274,7 +1345,7 @@ export default function GuestListManager() {
                           Allowed
                         </label>
                       </td>
-                      <td className="px-3 py-3 w-[170px]">
+                      <td className="px-3 py-2 w-[170px]">
                         <label className="flex items-center gap-2 text-sm text-charcoal/80">
                           <input
                             type="checkbox"
@@ -1290,11 +1361,11 @@ export default function GuestListManager() {
                           Accepted
                         </label>
                       </td>
-                      <td className="px-3 py-3 w-[190px]">
+                      <td className="px-3 py-2 w-[190px]">
                         <select
                           value={household.rsvpStatus}
                           onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
-                          className={selectClass}
+                          className={tableSelectClass}
                           disabled={locked}
                         >
                           {rsvpOptions.map((option) => (
@@ -1304,11 +1375,11 @@ export default function GuestListManager() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-3 py-3 w-[190px]">
+                      <td className="px-3 py-2 w-[190px]">
                         <select
                           value={household.dietaryRestrictions}
                           onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
-                          className={selectClass}
+                          className={tableSelectClass}
                         >
                           {dietaryOptions.map((option) => (
                             <option key={option} value={option}>
@@ -1317,76 +1388,49 @@ export default function GuestListManager() {
                           ))}
                         </select>
                       </td>
-                      <td className="px-3 py-3 w-[150px]">
+                      <td className="px-3 py-2 w-[150px]">
                         <input
                           type="text"
                           value={household.table}
                           onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
-                          className={inputClass}
+                          className={tableInputClass}
                           placeholder="Table"
                         />
                       </td>
-                      <td className="px-3 py-3 w-[260px]">
+                      <td className="px-3 py-2 w-[260px]">
                         <input
                           type="email"
                           value={household.email}
                           onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
-                          className={inputClass}
+                          className={tableInputClass}
                           placeholder="contact@email.com"
                         />
                       </td>
-                      <td className="px-3 py-3 w-[170px]">
+                      <td className="px-3 py-2 w-[170px]">
                         <input
                           type="tel"
                           value={household.phone}
                           onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
-                          className={inputClass}
+                          className={tableInputClass}
                           placeholder="(555) 123-4567"
                         />
                       </td>
-                      <td className="px-3 py-3 w-[420px]">
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            value={household.address.line1}
-                            onChange={(event) => updateAddressField(household.id, 'line1', event.target.value)}
-                            className={inputClass}
-                            placeholder="Street + unit"
-                          />
-                          <div className="grid grid-cols-3 gap-2">
-                            <input
-                              type="text"
-                              value={household.address.city}
-                              onChange={(event) => updateAddressField(household.id, 'city', event.target.value)}
-                              className={inputClass}
-                              placeholder="City"
-                            />
-                            <input
-                              type="text"
-                              value={household.address.state}
-                              onChange={(event) => updateAddressField(household.id, 'state', event.target.value)}
-                              className={inputClass}
-                              placeholder="State"
-                            />
-                            <input
-                              type="text"
-                              value={household.address.postalCode}
-                              onChange={(event) => updateAddressField(household.id, 'postalCode', event.target.value)}
-                              className={inputClass}
-                              placeholder="Zip"
-                            />
-                          </div>
-                          <input
-                            type="text"
-                            value={household.address.country}
-                            onChange={(event) => updateAddressField(household.id, 'country', event.target.value)}
-                            className={inputClass}
-                            placeholder="Country"
-                          />
+                      <td className="px-3 py-2 w-[420px]">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm text-charcoal/80" title={formatAddress(household.address)}>
+                            {formatAddress(household.address)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAddressModalId(household.id)}
+                            className="rounded-full border border-sage/40 px-2 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                          >
+                            View / edit
+                          </button>
                         </div>
                       </td>
-                      <td className="sticky right-0 px-3 py-3 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-10">
-                        <div className="relative inline-block text-left">
+                      <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-10">
+                        <div className="relative inline-block text-left z-30">
                           <button
                             type="button"
                             onClick={() => setOpenMenuId(openMenuId === household.id ? null : household.id)}
@@ -1397,7 +1441,7 @@ export default function GuestListManager() {
                             ⋯
                           </button>
                           {openMenuId === household.id && (
-                            <div className="absolute right-0 z-10 mt-2 w-44 rounded-xl border border-sage/30 bg-white p-2 text-left shadow-lg">
+                            <div className="absolute right-0 z-50 mt-2 w-44 rounded-xl border border-sage/30 bg-white p-2 text-left shadow-lg">
                               <button
                                 type="button"
                                 onClick={() => addGuest(household.id, 'primary')}
@@ -1420,26 +1464,30 @@ export default function GuestListManager() {
 
                     {isExpanded &&
                       household.guests.map((guest) => (
-                          <tr key={`${household.id}-${guest.id}`} className="bg-sage/10">
-                          <td className="px-3 py-3 pl-10 w-[260px]">
+                        <tr
+                          key={`${household.id}-${guest.id}`}
+                          className="bg-sage/10"
+                          style={{ animation: 'guestRowFadeIn 200ms ease-out' }}
+                        >
+                          <td className="sticky left-0 z-10 px-3 py-2 pl-10 w-[260px] bg-sage/10 shadow-[2px_0_0_rgba(0,0,0,0.04)]">
                             <input
                               type="text"
                               value={guest.name}
                               onChange={(event) => updateGuest(household.id, guest.id, { name: event.target.value })}
-                              className={inputClass}
+                              className={tableInputClass}
                               placeholder="Guest name"
                             />
                           </td>
-                          <td className="px-3 py-3 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[160px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[160px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[170px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[190px]">
+                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[190px]">
                             <select
                               value={guest.rsvpStatus}
                               onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
-                              className={selectClass}
+                              className={tableSelectClass}
                               disabled={locked}
                             >
                               {rsvpOptions.map((option) => (
@@ -1449,11 +1497,11 @@ export default function GuestListManager() {
                               ))}
                             </select>
                           </td>
-                          <td className="px-3 py-3 w-[190px]">
+                          <td className="px-3 py-2 w-[190px]">
                             <select
                               value={guest.dietary}
                               onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
-                              className={selectClass}
+                              className={tableSelectClass}
                               disabled={locked}
                             >
                               {dietaryOptions.map((option) => (
@@ -1463,11 +1511,11 @@ export default function GuestListManager() {
                               ))}
                             </select>
                           </td>
-                          <td className="px-3 py-3 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[260px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[170px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-3 w-[420px] text-sm text-charcoal/60">—</td>
-                          <td className="sticky right-0 px-3 py-3 w-[110px] text-right backdrop-blur bg-sage/10 shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
+                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[260px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>
+                          <td className="px-3 py-2 w-[420px] text-sm text-charcoal/60">—</td>
+                          <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-sage/10 shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                             <div className="flex justify-end">
                               <button
                                 type="button"
@@ -1494,10 +1542,303 @@ export default function GuestListManager() {
           </table>
         </div>
       </div>
+      {addressModalHousehold && (
+        <>
+          <button
+            type="button"
+            onClick={() => setAddressModalId(null)}
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
+            aria-label="Close address editor"
+          />
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto px-4 pb-10 pt-20">
+            <div className="w-full max-w-xl rounded-2xl border border-sage/30 bg-white shadow-2xl shadow-sage/30">
+              <div className="flex items-center justify-between border-b border-sage/20 px-5 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-sage-dark">Address for {addressModalHousehold.envelopeName}</p>
+                  <p className="text-xs text-charcoal/70">{formatAddress(addressModalHousehold.address)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAddressModalId(null)}
+                  className="rounded-full border border-sage/40 px-3 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                >
+                  Done
+                </button>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <label className="block text-xs font-semibold text-sage-dark/80">
+                  Street + unit
+                  <input
+                    type="text"
+                    value={addressModalHousehold.address.line1}
+                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'line1', event.target.value)}
+                    className={`${inputClass} mt-2`}
+                    placeholder="123 Street Ave Apt 4"
+                  />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    value={addressModalHousehold.address.city}
+                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'city', event.target.value)}
+                    className={inputClass}
+                    placeholder="City"
+                  />
+                  <input
+                    type="text"
+                    value={addressModalHousehold.address.state}
+                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'state', event.target.value)}
+                    className={inputClass}
+                    placeholder="State"
+                  />
+                  <input
+                    type="text"
+                    value={addressModalHousehold.address.postalCode}
+                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'postalCode', event.target.value)}
+                    className={inputClass}
+                    placeholder="Zip"
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={addressModalHousehold.address.country}
+                  onChange={(event) => updateAddressField(addressModalHousehold.id, 'country', event.target.value)}
+                  className={inputClass}
+                  placeholder="Country"
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      {draftHousehold && (
+        <>
+          <button
+            type="button"
+            onClick={cancelDraftHousehold}
+            className="fixed inset-0 z-40 bg-black/25 backdrop-blur-sm"
+            aria-label="Close new invite overlay"
+          />
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto px-4 pb-10 pt-14">
+            <form
+              id="draft-household-panel"
+              onSubmit={(event) => {
+                event.preventDefault()
+                confirmDraftHousehold()
+              }}
+              className="w-full max-w-6xl rounded-2xl border border-sage/30 bg-white shadow-2xl shadow-sage/30 transition duration-300 ease-out"
+            >
+              <div className="flex items-center justify-between border-b border-sage/20 px-6 py-4">
+                <div>
+                  <p className="text-sm font-semibold text-sage-dark">New invite (staged)</p>
+                  <p className="text-sm text-charcoal/70">Fill details, then add to table. You can add additional household guests once the entry is added.</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelDraftHousehold}
+                    className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+                  >
+                    Add to table
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-4 px-6 py-6 lg:grid-cols-2">
+                <div className="space-y-3">
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Household name
+                    <input
+                      type="text"
+                      value={draftHousehold.envelopeName}
+                      onChange={(event) => updateDraftField('envelopeName', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="Household or envelope name"
+                      required
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Invited by
+                    <select
+                      value={draftHousehold.invitedBy}
+                      onChange={(event) => updateDraftField('invitedBy', event.target.value)}
+                      className={`${selectClass} mt-2`}
+                    >
+                      {invitedByOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                      <input
+                        type="checkbox"
+                        checked={draftHousehold.invitationSent}
+                        onChange={() => updateDraftField('invitationSent', !draftHousehold.invitationSent)}
+                        className={checkboxClass}
+                      />
+                      Invite sent
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                      <input
+                        type="checkbox"
+                        checked={draftHousehold.saveTheDateSent}
+                        onChange={() => updateDraftField('saveTheDateSent', !draftHousehold.saveTheDateSent)}
+                        className={checkboxClass}
+                      />
+                      Save the date
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                      <input
+                        type="checkbox"
+                        checked={draftHousehold.plusOneAllowed}
+                        onChange={() =>
+                          updateDraftField('plusOneAllowed', !draftHousehold.plusOneAllowed)
+                        }
+                        className={checkboxClass}
+                      />
+                      +1 allowed
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                      <input
+                        type="checkbox"
+                        checked={draftHousehold.plusOneAccepted}
+                        onChange={() =>
+                          updateDraftField('plusOneAccepted', draftHousehold.plusOneAllowed ? !draftHousehold.plusOneAccepted : false)
+                        }
+                        className={checkboxClass}
+                        disabled={!draftHousehold.plusOneAllowed}
+                      />
+                      +1 accepted
+                    </label>
+                  </div>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    RSVP
+                    <select
+                      value={draftHousehold.rsvpStatus}
+                      onChange={(event) => updateDraftField('rsvpStatus', event.target.value)}
+                      className={`${selectClass} mt-2`}
+                    >
+                      {rsvpOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Primary guest
+                    <input
+                      type="text"
+                      value={draftHousehold.guests[0]?.name || ''}
+                      onChange={(event) =>
+                        updateDraftGuest(draftHousehold.guests[0]?.id, { name: event.target.value })
+                      }
+                      className={`${inputClass} mt-2`}
+                      placeholder="Primary guest name"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Notes
+                    <textarea
+                      rows={3}
+                      value={draftHousehold.notes}
+                      onChange={(event) => updateDraftField('notes', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="Any notes for this household"
+                    />
+                  </label>
+                </div>
+                <div className="space-y-3">
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Table
+                    <input
+                      type="text"
+                      value={draftHousehold.table}
+                      onChange={(event) => updateDraftField('table', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="Table name or number"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Email
+                    <input
+                      type="email"
+                      value={draftHousehold.email}
+                      onChange={(event) => updateDraftField('email', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="contact@email.com"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Phone
+                    <input
+                      type="tel"
+                      value={draftHousehold.phone}
+                      onChange={(event) => updateDraftField('phone', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="(555) 123-4567"
+                    />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Address line
+                    <input
+                      type="text"
+                      value={draftHousehold.address.line1}
+                      onChange={(event) => updateDraftAddressField('line1', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="Street + unit"
+                    />
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      value={draftHousehold.address.city}
+                      onChange={(event) => updateDraftAddressField('city', event.target.value)}
+                      className={inputClass}
+                      placeholder="City"
+                    />
+                    <input
+                      type="text"
+                      value={draftHousehold.address.state}
+                      onChange={(event) => updateDraftAddressField('state', event.target.value)}
+                      className={inputClass}
+                      placeholder="State"
+                    />
+                    <input
+                      type="text"
+                      value={draftHousehold.address.postalCode}
+                      onChange={(event) => updateDraftAddressField('postalCode', event.target.value)}
+                      className={inputClass}
+                      placeholder="Zip"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={draftHousehold.address.country}
+                    onChange={(event) => updateDraftAddressField('country', event.target.value)}
+                    className={inputClass}
+                    placeholder="Country"
+                  />
+                </div>
+              </div>
+            </form>
+          </div>
+        </>
+      )}
       {showFloatingAdd && (
         <button
           type="button"
-          onClick={addHousehold}
+          onClick={startNewHouseholdDraft}
           className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-sage px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-sage/40 transition hover:bg-sage-dark"
           aria-label="Add invite"
         >
