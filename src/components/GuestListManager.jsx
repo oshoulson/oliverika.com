@@ -283,6 +283,7 @@ export default function GuestListManager() {
   const [passwordInput, setPasswordInput] = useState('')
   const [authError, setAuthError] = useState('')
   const [households, setHouseholds] = useState(initialHouseholds)
+  const householdsRef = useRef(initialHouseholds)
   const [expandedHouseholds, setExpandedHouseholds] = useState(() => new Set(initialHouseholds.map((household) => household.id)))
   const [openMenuId, setOpenMenuId] = useState(null)
   const [remoteStatus, setRemoteStatus] = useState('idle')
@@ -308,6 +309,10 @@ export default function GuestListManager() {
       console.warn('Unable to read guest list auth flag', error)
     }
   }, [])
+
+  useEffect(() => {
+    householdsRef.current = households
+  }, [households])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -383,6 +388,7 @@ export default function GuestListManager() {
 
   const persistGuestList = async () => {
     if (isSavingRef.current) return
+    const latestHouseholds = householdsRef.current
     isSavingRef.current = true
     setRemoteStatus((status) => (status === 'loading' ? 'loading' : 'saving'))
     setRemoteError('')
@@ -390,7 +396,7 @@ export default function GuestListManager() {
       const response = await fetch(`${FUNCTIONS_BASE}/guest-list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ households }),
+        body: JSON.stringify({ households: latestHouseholds }),
       })
       if (!response.ok) {
         throw new Error('Save failed')
