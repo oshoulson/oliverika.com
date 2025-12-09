@@ -63,6 +63,7 @@ const handlePost = async (event) => {
   try {
     payload = JSON.parse(event.body || '{}')
   } catch (error) {
+    console.error('guest-list payload parse error', error)
     return bad(400, 'Invalid JSON')
   }
 

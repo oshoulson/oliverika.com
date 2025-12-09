@@ -3,6 +3,7 @@ import heroImage from './assets/hero.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
 import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, slugify } from './components/GuestListManager.jsx'
 
+const TISCH_START_TIME = '2:30 PM'
 const navLinks = [
   { label: 'Home', href: '#home' },
   { label: 'Gallery', href: '#gallery' },
@@ -11,9 +12,17 @@ const navLinks = [
   { label: 'Registry', href: '#registry' },
 ]
 
-const details = [
+const defaultDetails = [
   { label: 'Date', value: 'October 11, 2026' },
   { label: 'Arrival', value: 'Guests at 4:30 PM' },
+  { label: 'Venue', value: 'The Gardens at Elm Bank' },
+  { label: 'City', value: 'Wellesley, Massachusetts' },
+]
+
+const tischDetails = [
+  { label: 'Date', value: 'October 11, 2026' },
+  { label: 'Tisch', value: `${TISCH_START_TIME} (songs, toasts, ketubah signing)` },
+  { label: 'Ceremony', value: 'Chuppah at 4:30 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
 ]
@@ -23,6 +32,34 @@ const travelNotes = [
   { title: 'Getting There', text: 'The venue is a 30-minute ride from downtown Boston. Rideshare drop-off is at the Cheney Gate entrance; limited parking is available on site.' },
   { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
 ]
+
+const baseAgendaItems = [
+  {
+    key: 'arrival',
+    time: '4:30 PM',
+    title: 'Arrivals + garden hello',
+    description: 'Stroll the grounds, say hi to family, and find your seat before we head to the chuppah.',
+  },
+  {
+    key: 'ceremony',
+    time: 'Shortly after arrivals',
+    title: 'Ceremony',
+    description: 'We will gather under the chuppah outdoors (with an indoor backup if New England weather insists).',
+  },
+  {
+    key: 'reception',
+    time: 'Evening',
+    title: 'Reception',
+    description: 'Cocktail hour, dinner, and dancing inside the carriage house to celebrate together.',
+  },
+]
+
+const tischAgendaItem = {
+  key: 'tisch',
+  time: TISCH_START_TIME,
+  title: 'Tisch (pre-ceremony)',
+  description: 'A joyful gathering with singing, toasts, and blessings around the table before the formal ceremony.',
+}
 
 const fallbackGallery = [
   {
@@ -60,14 +97,25 @@ const normalizeRsvpStatus = (status) => {
   if (value === 'Tentative' || value === 'Not offered') return 'Awaiting response'
   return 'Awaiting response'
 }
+const normalizeTischRsvp = (status, invited) => {
+  const invitedFlag = Boolean(invited)
+  if (!invitedFlag) return 'Not invited'
+  const value = (status || '').trim()
+  if (['Attending', 'Not attending', 'Awaiting response'].includes(value)) {
+    return value
+  }
+  return 'Awaiting response'
+}
 const normalizeHousehold = (household) => ({
   ...household,
   slug: household.slug || slugify(household.envelopeName || 'household'),
+  tischInvited: Boolean(household.tischInvited),
   plusOneAccepted: Boolean(household.plusOneAccepted),
   rsvpLocked: Boolean(household.rsvpLocked),
   guests: (household.guests || []).map((guest) => ({
     ...guest,
     rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
+    tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
     dietary: guest.dietary || 'None',
   })),
 })
@@ -118,6 +166,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [galleryError, setGalleryError] = useState('')
   const [hasDoodle, setHasDoodle] = useState(false)
   const [targetResponses, setTargetResponses] = useState([])
+  const [targetTischResponses, setTargetTischResponses] = useState([])
   const [targetDietaries, setTargetDietaries] = useState([])
   const [targetNotes, setTargetNotes] = useState('')
   const [targetPlusOne, setTargetPlusOne] = useState(false)
@@ -131,6 +180,9 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const bringingGuest = formData.bringingGuest === 'yes' && isAttending
   const submissionLocked = hasSubmitted
   const isSlugRsvp = Boolean(householdMatch)
+  const isTischInvite = Boolean(householdMatch?.tischInvited)
+  const heroDetails = isTischInvite ? tischDetails : defaultDetails
+  const agendaItems = isTischInvite ? [tischAgendaItem, ...baseAgendaItems] : baseAgendaItems
 
   const updateField = (field) => (event) => {
     setFormData((prev) => ({ ...prev, [field]: event.target.value }))
@@ -141,6 +193,43 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       ...prev,
       [field]: prev[field] === value ? '' : value,
     }))
+  }
+
+  const eventSelectionsFromStatus = (status) => {
+    const normalized = normalizeRsvpStatus(status)
+    return {
+      ceremony: ['Both events', 'Ceremony only'].includes(normalized),
+      reception: ['Both events', 'Reception only'].includes(normalized),
+    }
+  }
+
+  const statusFromSelections = (selections) => {
+    if (selections.ceremony && selections.reception) return 'Both events'
+    if (selections.ceremony) return 'Ceremony only'
+    if (selections.reception) return 'Reception only'
+    return 'Not attending'
+  }
+
+  const setEventAttendance = (index, eventKey, attending) => {
+    setTargetResponses((prev) => {
+      const next = [...prev]
+      const selections = eventSelectionsFromStatus(next[index] || 'Awaiting response')
+      if (attending === null) {
+        next[index] = 'Awaiting response'
+        return next
+      }
+      selections[eventKey] = attending
+      next[index] = statusFromSelections(selections)
+      return next
+    })
+  }
+
+  const setTischResponse = (index, value) => {
+    setTargetTischResponses((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
   }
 
   const rememberSubmissionFlag = () => {
@@ -185,11 +274,14 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         const guests = (household.guests || []).map((guest, index) => ({
           ...guest,
           rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
+          tischRsvp: normalizeTischRsvp(targetTischResponses[index], householdMatch?.tischInvited),
           dietary: targetDietaries[index] || guest.dietary || 'None',
         }))
         const plusOneAccepted = household.plusOneAllowed ? targetPlusOne : false
-        const anyAccepted = guests.some((guest) => guest.rsvpStatus === 'Accepted') || plusOneAccepted
-        const allDeclined = guests.every((guest) => guest.rsvpStatus === 'Declined') && !plusOneAccepted
+        const anyAccepted =
+          guests.some((guest) => ['Both events', 'Ceremony only', 'Reception only'].includes(normalizeRsvpStatus(guest.rsvpStatus))) ||
+          plusOneAccepted
+        const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !plusOneAccepted
         const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
         return {
           ...household,
@@ -209,6 +301,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       setSubmissionAction('updated')
       setHasSubmitted(true)
     } catch (error) {
+      console.error('household rsvp save error', error)
       setFormStatus('error')
       setFormError('Unable to save RSVP right now. Please try again.')
     }
@@ -322,8 +415,22 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   }, [])
 
   useEffect(() => {
-    if (!householdMatch) return
-    setTargetResponses((householdMatch.guests || []).map((guest) => guest.rsvpStatus || 'Awaiting response'))
+    if (!householdMatch) {
+      setTargetResponses([])
+      setTargetTischResponses([])
+      setTargetDietaries([])
+      setTargetPlusOne(false)
+      setTargetNotes('')
+      setTargetEmail('')
+      setTargetLocked(false)
+      setHasSubmitted(false)
+      setSubmissionAction('created')
+      return
+    }
+    setTargetResponses((householdMatch.guests || []).map((guest) => normalizeRsvpStatus(guest.rsvpStatus)))
+    setTargetTischResponses(
+      (householdMatch.guests || []).map((guest) => normalizeTischRsvp(guest.tischRsvp, householdMatch.tischInvited)),
+    )
     setTargetDietaries((householdMatch.guests || []).map((guest) => guest.dietary || 'None'))
     setTargetPlusOne(Boolean(householdMatch.plusOneAccepted))
     setTargetNotes(householdMatch.notes || '')
@@ -445,7 +552,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           </div>
 
           <div className="space-y-4 pt-10">
-            {details.map((item) => (
+            {heroDetails.map((item) => (
               <div key={item.label} className="flex justify-between text-xs tracking-wide text-bone/70">
                 <span className="uppercase">{item.label}</span>
                 <span className="font-medium text-bone">{item.value}</span>
@@ -465,6 +572,38 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         >
           RSVP
         </a>
+      </section>
+
+      <section id="agenda" className="mx-auto mt-12 max-w-5xl rounded-2xl border border-white/50 bg-white/75 p-10 text-charcoal shadow-frame backdrop-blur">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Agenda</p>
+            <h2 className="mt-3 font-serif text-4xl text-sage-dark">Day-of flow</h2>
+            <p className="mt-2 text-sm text-charcoal/75">Times update based on your invite link. You’ll only see the tisch if you’re invited.</p>
+          </div>
+          {isTischInvite && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+              <p className="font-semibold">You’re invited to the tisch</p>
+              <p className="mt-1">
+                Please arrive by {TISCH_START_TIME}. We’ll sing, toast, and sign our ketubah before joining everyone at 4:30 PM.
+              </p>
+            </div>
+          )}
+        </div>
+        <div className="mt-6 grid gap-3 md:grid-cols-2">
+          {agendaItems.map((item) => (
+            <div key={item.key} className="rounded-2xl border border-sage/25 bg-white/80 p-5 shadow-sm">
+              <p className="text-[0.7rem] uppercase tracking-[0.35em] text-sage-dark/70">{item.time}</p>
+              <p className="mt-2 text-lg font-semibold text-sage-dark">{item.title}</p>
+              <p className="mt-1 text-sm text-charcoal/75">{item.description}</p>
+              {item.key === 'tisch' && (
+                <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  What’s a tisch? It’s a joyful pre-ceremony gathering with singing, toasts, and shared blessings around the table.
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
       </section>
 
       <section id="travel" className="mx-auto mt-16 max-w-5xl rounded-2xl border border-white/50 bg-white/70 p-10 text-charcoal shadow-frame backdrop-blur">
@@ -598,6 +737,11 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                   {householdMatch?.plusOneAllowed && (
                     <p className="mt-2 text-xs text-charcoal/70">Plus-one noted on your envelope.</p>
                   )}
+                  {isTischInvite && (
+                    <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      Tisch invite: please arrive by {TISCH_START_TIME} for singing, toasts, and ketubah signing before the ceremony.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -616,12 +760,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
 
                 {(householdMatch?.guests || []).map((guest, index) => {
                   const current = targetResponses[index] || 'Awaiting response'
-                  const setValue = (value) =>
-                    setTargetResponses((prev) => {
-                      const next = [...prev]
-                      next[index] = value
-                      return next
-                    })
+                  const selections = eventSelectionsFromStatus(current)
                   const setDietary = (value) =>
                     setTargetDietaries((prev) => {
                       const next = [...prev]
@@ -629,33 +768,148 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                       return next
                     })
                   const dietaryValue = targetDietaries[index] || 'None'
+                  const tischValue = normalizeTischRsvp(targetTischResponses[index], isTischInvite)
+                  const resetAwaiting = () => {
+                    setTargetResponses((prev) => {
+                      const next = [...prev]
+                      next[index] = 'Awaiting response'
+                      return next
+                    })
+                    if (isTischInvite) {
+                      setTischResponse(index, 'Awaiting response')
+                    }
+                  }
+                  const markNotAttending = () => {
+                    setTargetResponses((prev) => {
+                      const next = [...prev]
+                      next[index] = 'Not attending'
+                      return next
+                    })
+                    if (isTischInvite) {
+                      setTischResponse(index, 'Not attending')
+                    }
+                  }
                   return (
                     <div key={guest.id} className="space-y-3 rounded-2xl border border-sage/20 bg-white/70 p-4 shadow-sm">
                       <p className="text-sm font-semibold text-sage-dark">{guest.name}, are you coming?</p>
-                      <div className="flex flex-wrap gap-3 text-sm">
-                        {[
-                          { value: 'Both events', label: 'Obviously (ceremony + reception)' },
-                          { value: 'Ceremony only', label: 'Ceremony only' },
-                          { value: 'Reception only', label: 'Reception only' },
-                          { value: 'Not attending', label: '😢😢😢😢 Neither' },
-                        ].map((option) => {
-                          const isActive = current === option.value
-                          return (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
+                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">
+                            <span>Ceremony</span>
+                            <span className="text-[0.65rem] text-charcoal/60">Garden chuppah</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-sm">
                             <button
-                              key={option.value}
                               type="button"
                               disabled={targetLocked}
-                              onClick={() => setValue(option.value)}
+                              onClick={() => setEventAttendance(index, 'ceremony', true)}
                               className={`rounded-full border px-4 py-2 transition ${
-                                isActive
+                                selections.ceremony
                                   ? 'border-sage bg-sage text-white shadow-sm'
                                   : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
                               } disabled:cursor-not-allowed disabled:opacity-60`}
                             >
-                              {option.label}
+                              I’ll be there
                             </button>
-                          )
-                        })}
+                            <button
+                              type="button"
+                              disabled={targetLocked}
+                              onClick={() => setEventAttendance(index, 'ceremony', false)}
+                              className={`rounded-full border px-4 py-2 transition ${
+                                !selections.ceremony && current !== 'Awaiting response'
+                                  ? 'border-sage bg-sage text-white shadow-sm'
+                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                              Skip ceremony
+                            </button>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
+                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">
+                            <span>Reception</span>
+                            <span className="text-[0.65rem] text-charcoal/60">Dinner + dancing</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                            <button
+                              type="button"
+                              disabled={targetLocked}
+                              onClick={() => setEventAttendance(index, 'reception', true)}
+                              className={`rounded-full border px-4 py-2 transition ${
+                                selections.reception
+                                  ? 'border-sage bg-sage text-white shadow-sm'
+                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                              I’ll be there
+                            </button>
+                            <button
+                              type="button"
+                              disabled={targetLocked}
+                              onClick={() => setEventAttendance(index, 'reception', false)}
+                              className={`rounded-full border px-4 py-2 transition ${
+                                !selections.reception && current !== 'Awaiting response'
+                                  ? 'border-sage bg-sage text-white shadow-sm'
+                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                            >
+                              Skip reception
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      {isTischInvite && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.25em] text-amber-900/90">
+                            <span>Tisch {TISCH_START_TIME}</span>
+                            <span className="text-[0.65rem] text-amber-900/80">pre-ceremony</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {[
+                              { value: 'Attending', label: 'I’ll be there' },
+                              { value: 'Awaiting response', label: 'Not sure yet' },
+                              { value: 'Not attending', label: 'Can’t make it' },
+                            ].map((option) => {
+                              const isActive = tischValue === option.value
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  disabled={targetLocked}
+                                  onClick={() => setTischResponse(index, option.value)}
+                                  className={`rounded-full border px-4 py-2 transition ${
+                                    isActive
+                                      ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
+                                      : 'border-amber-200 bg-white text-amber-900 hover:border-amber-400 hover:bg-amber-100'
+                                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                                >
+                                  {option.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <p className="mt-2 text-xs text-amber-900/80">
+                            What’s a tisch? A spirited gathering with songs, toasts, and well wishes before the ceremony.
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.3em]">
+                        <button
+                          type="button"
+                          disabled={targetLocked}
+                          onClick={resetAwaiting}
+                          className="rounded-full border border-sage/40 px-3 py-2 font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Not sure yet
+                        </button>
+                        <button
+                          type="button"
+                          disabled={targetLocked}
+                          onClick={markNotAttending}
+                          className="rounded-full border border-rose-200 px-3 py-2 font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Can’t attend either
+                        </button>
                       </div>
                       <div>
                         <label className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Dietary preference</label>

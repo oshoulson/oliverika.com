@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+/* eslint-disable react-refresh/only-export-components */
 
 const AUTH_STORAGE_KEY = 'oliverikaGuestListAuth'
 export const DATA_STORAGE_KEY = 'oliverikaGuestListData'
+const HIDDEN_COLUMNS_KEY = 'oliverikaGuestHiddenColumns'
 const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
 const FUNCTIONS_BASE = '/.netlify/functions'
 
@@ -36,6 +38,7 @@ const seedHouseholds = [
     phone: '(617) 555-1198',
     saveTheDateSent: true,
     invitationSent: false,
+    tischInvited: true,
     plusOneAllowed: false,
     plusOneAccepted: false,
     rsvpStatus: 'Awaiting response',
@@ -50,6 +53,7 @@ const seedHouseholds = [
         role: 'Groom',
         type: 'primary',
         rsvpStatus: 'Accepted',
+        tischRsvp: 'Attending',
         dietary: 'None',
       },
       {
@@ -58,6 +62,7 @@ const seedHouseholds = [
         role: 'Bride',
         type: 'primary',
         rsvpStatus: 'Accepted',
+        tischRsvp: 'Attending',
         dietary: 'Vegetarian',
       },
     ],
@@ -78,6 +83,7 @@ const seedHouseholds = [
     phone: '(617) 555-2222',
     saveTheDateSent: true,
     invitationSent: true,
+    tischInvited: false,
     plusOneAllowed: true,
     plusOneAccepted: false,
     rsvpStatus: 'Awaiting response',
@@ -92,6 +98,7 @@ const seedHouseholds = [
         role: 'College friend',
         type: 'primary',
         rsvpStatus: 'Awaiting response',
+        tischRsvp: 'Not invited',
         dietary: 'None',
       },
       {
@@ -100,6 +107,7 @@ const seedHouseholds = [
         role: 'Partner',
         type: 'primary',
         rsvpStatus: 'Awaiting response',
+        tischRsvp: 'Not invited',
         dietary: 'Gluten free',
       },
       {
@@ -108,6 +116,7 @@ const seedHouseholds = [
         role: 'Optional guest',
         type: 'plus-one',
         rsvpStatus: 'Not offered',
+        tischRsvp: 'Not invited',
         dietary: 'None',
       },
     ],
@@ -128,6 +137,7 @@ const seedHouseholds = [
     phone: '(860) 555-8765',
     saveTheDateSent: false,
     invitationSent: false,
+    tischInvited: false,
     plusOneAllowed: false,
     plusOneAccepted: false,
     rsvpStatus: 'Awaiting response',
@@ -142,6 +152,7 @@ const seedHouseholds = [
         role: 'Cousin',
         type: 'primary',
         rsvpStatus: 'Awaiting response',
+        tischRsvp: 'Not invited',
         dietary: 'Kosher style',
       },
       {
@@ -150,6 +161,7 @@ const seedHouseholds = [
         role: 'Spouse',
         type: 'primary',
         rsvpStatus: 'Awaiting response',
+        tischRsvp: 'Not invited',
         dietary: 'None',
       },
       {
@@ -158,6 +170,7 @@ const seedHouseholds = [
         role: 'Child',
         type: 'child',
         rsvpStatus: 'Awaiting response',
+        tischRsvp: 'Not invited',
         dietary: 'Peanut allergy',
       },
     ],
@@ -167,6 +180,22 @@ const seedHouseholds = [
 const rsvpOptions = ['Awaiting response', 'Both events', 'Ceremony only', 'Reception only', 'Not attending']
 const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
 const invitedByOptions = ['Bride', 'Groom', 'Both']
+const tischRsvpOptions = ['Awaiting response', 'Attending', 'Not attending', 'Not invited']
+const toggleableColumnLabels = {
+  invitedBy: 'Invited by',
+  invitationSent: 'Invite sent',
+  saveTheDateSent: 'Save the date',
+  plusOneAllowed: '+1 allowed',
+  plusOneAccepted: '+1 accepted',
+  tischInvited: 'Tisch invited',
+  rsvpStatus: 'RSVP',
+  dietaryRestrictions: 'Dietary',
+  table: 'Table',
+  email: 'Email',
+  phone: 'Phone',
+  address: 'Address',
+}
+const tableColumnKeys = Object.keys(toggleableColumnLabels)
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
 const selectClass =
@@ -195,6 +224,7 @@ const createDefaultFilters = () => ({
   saveTheDateSent: 'any',
   plusOneAllowed: 'any',
   plusOneAccepted: 'any',
+  tischInvited: 'any',
   rsvpStatus: 'all',
   dietaryRestrictions: '',
   table: '',
@@ -219,6 +249,7 @@ const blankHousehold = () => ({
   phone: '',
   saveTheDateSent: false,
   invitationSent: false,
+  tischInvited: false,
   plusOneAllowed: false,
   plusOneAccepted: false,
   rsvpStatus: 'Awaiting response',
@@ -229,26 +260,28 @@ const blankHousehold = () => ({
   guests: [
     {
       id: createId('guest'),
-      name: 'Primary guest',
-      role: '',
-      type: 'primary',
-      rsvpStatus: 'Awaiting response',
-      dietary: 'None',
-    },
+    name: 'Primary guest',
+    role: '',
+    type: 'primary',
+    rsvpStatus: 'Awaiting response',
+    tischRsvp: 'Not invited',
+    dietary: 'None',
+  },
   ],
 })
 
-const ensureDerivedFields = (household) => ({
-  ...household,
-  slug: household.slug || slugify(household.envelopeName || 'household'),
-  plusOneAccepted: Boolean(household.plusOneAccepted),
-  rsvpLocked: Boolean(household.rsvpLocked),
-  guests: (household.guests || []).map((guest) => ({
-    ...guest,
-    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
-    dietary: guest.dietary || 'None',
-  })),
-})
+const loadHiddenColumns = () => {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(HIDDEN_COLUMNS_KEY) || '[]')
+    if (Array.isArray(stored)) {
+      return new Set(stored.filter((key) => tableColumnKeys.includes(key)))
+    }
+  } catch (error) {
+    console.warn('Unable to read hidden columns', error)
+  }
+  return new Set()
+}
 
 const normalizeRsvpStatus = (status) => {
   const value = (status || '').trim()
@@ -260,6 +293,30 @@ const normalizeRsvpStatus = (status) => {
   if (value === 'Tentative' || value === 'Not offered') return 'Awaiting response'
   return 'Awaiting response'
 }
+
+const normalizeTischRsvp = (status, invited) => {
+  const invitedFlag = Boolean(invited)
+  if (!invitedFlag) return 'Not invited'
+  const value = (status || '').trim()
+  if (['Attending', 'Not attending', 'Awaiting response'].includes(value)) {
+    return value
+  }
+  return 'Awaiting response'
+}
+
+const ensureDerivedFields = (household) => ({
+  ...household,
+  slug: household.slug || slugify(household.envelopeName || 'household'),
+  tischInvited: Boolean(household.tischInvited),
+  plusOneAccepted: Boolean(household.plusOneAccepted),
+  rsvpLocked: Boolean(household.rsvpLocked),
+  guests: (household.guests || []).map((guest) => ({
+    ...guest,
+    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
+    tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
+    dietary: guest.dietary || 'None',
+  })),
+})
 
 export const loadInitialHouseholds = () => {
   if (typeof window === 'undefined') return seedHouseholds.map(ensureDerivedFields)
@@ -289,6 +346,8 @@ export default function GuestListManager() {
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false)
+  const [hiddenColumns, setHiddenColumns] = useState(loadHiddenColumns)
   const [sortConfig, setSortConfig] = useState({ key: 'envelopeName', direction: 'asc' })
   const [filters, setFilters] = useState(createDefaultFilters)
   const [showFloatingAdd, setShowFloatingAdd] = useState(false)
@@ -297,6 +356,7 @@ export default function GuestListManager() {
   const saveTimer = useRef(null)
   const isSavingRef = useRef(false)
   const exportMenuRef = useRef(null)
+  const columnsMenuRef = useRef(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -322,6 +382,15 @@ export default function GuestListManager() {
       console.warn('Unable to persist guest list', error)
     }
   }, [households])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
+    } catch (error) {
+      console.warn('Unable to persist hidden columns', error)
+    }
+  }, [hiddenColumns])
 
   useEffect(() => {
     let cancelled = false
@@ -380,6 +449,9 @@ export default function GuestListManager() {
     const handleClickOutside = (event) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
         setExportMenuOpen(false)
+      }
+      if (columnsMenuRef.current && !columnsMenuRef.current.contains(event.target)) {
+        setColumnsMenuOpen(false)
       }
     }
     document.addEventListener('click', handleClickOutside)
@@ -507,6 +579,9 @@ export default function GuestListManager() {
     setFilters(createDefaultFilters())
   }
 
+  const isColumnVisible = (key) => !hiddenColumns.has(key)
+  const visibleColumnCount = tableColumnKeys.filter((key) => isColumnVisible(key)).length + 2
+
   const renderSortIcon = (columnKey) => {
     const active = sortConfig.key === columnKey
     const directionClass = active && sortConfig.direction === 'asc' ? '-rotate-180' : ''
@@ -533,6 +608,14 @@ export default function GuestListManager() {
             next.slug = slugify(updates.envelopeName)
           }
         }
+        if (typeof updates.tischInvited !== 'undefined') {
+          const invited = Boolean(updates.tischInvited)
+          next.tischInvited = invited
+          next.guests = (next.guests || []).map((guest) => ({
+            ...guest,
+            tischRsvp: normalizeTischRsvp(guest.tischRsvp, invited),
+          }))
+        }
         return next
       }),
     )
@@ -550,28 +633,41 @@ export default function GuestListManager() {
 
   const updateGuest = (householdId, guestId, updates) => {
     setHouseholds((prev) =>
-      prev.map((household) =>
-        household.id === householdId
-          ? { ...household, guests: household.guests.map((guest) => (guest.id === guestId ? { ...guest, ...updates } : guest)) }
-          : household,
-      ),
+      prev.map((household) => {
+        if (household.id !== householdId) return household
+        const invited = Boolean(household.tischInvited)
+        const guests = household.guests.map((guest) => {
+          if (guest.id !== guestId) return guest
+          const nextGuest = { ...guest, ...updates }
+          if (typeof updates.tischRsvp !== 'undefined') {
+            nextGuest.tischRsvp = normalizeTischRsvp(updates.tischRsvp, invited)
+          } else {
+            nextGuest.tischRsvp = normalizeTischRsvp(nextGuest.tischRsvp, invited)
+          }
+          return nextGuest
+        })
+        return { ...household, guests }
+      }),
     )
     queuePersist()
   }
 
   const addGuest = (householdId, type = 'primary') => {
-    const newGuest = {
-      id: createId('guest'),
-      name: type === 'plus-one' ? 'Plus One (TBD)' : 'New guest',
-      role: type === 'child' ? 'Child' : '',
-      type,
-      rsvpStatus: type === 'plus-one' ? 'Not offered' : 'Awaiting response',
-      dietary: 'None',
-    }
     setHouseholds((prev) =>
-      prev.map((household) =>
-        household.id === householdId ? { ...household, guests: [...household.guests, newGuest] } : household,
-      ),
+      prev.map((household) => {
+        if (household.id !== householdId) return household
+        const invited = Boolean(household.tischInvited)
+        const newGuest = {
+          id: createId('guest'),
+          name: type === 'plus-one' ? 'Plus One (TBD)' : 'New guest',
+          role: type === 'child' ? 'Child' : '',
+          type,
+          rsvpStatus: type === 'plus-one' ? 'Not offered' : 'Awaiting response',
+          tischRsvp: invited ? 'Awaiting response' : 'Not invited',
+          dietary: 'None',
+        }
+        return { ...household, guests: [...household.guests, newGuest] }
+      }),
     )
     setOpenMenuId(null)
     queuePersist()
@@ -632,6 +728,7 @@ export default function GuestListManager() {
       if (!boolMatches(household.saveTheDateSent, filters.saveTheDateSent)) return false
       if (!boolMatches(household.plusOneAllowed, filters.plusOneAllowed)) return false
       if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
+      if (!boolMatches(household.tischInvited, filters.tischInvited)) return false
       if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
       if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
       if (filters.table && !textIncludes(household.table, filters.table)) return false
@@ -653,6 +750,7 @@ export default function GuestListManager() {
           case 'saveTheDateSent':
           case 'plusOneAllowed':
           case 'plusOneAccepted':
+          case 'tischInvited':
             return household[key] ? 1 : 0
           case 'address':
             return `${household.address.line1} ${household.address.city} ${household.address.state} ${household.address.postalCode} ${household.address.country}`.trim()
@@ -706,6 +804,7 @@ export default function GuestListManager() {
       'Save The Date Sent',
       'Plus One Allowed',
       'Plus One Accepted',
+      'Tisch Invited',
       'Household RSVP',
       'Household Dietary',
       'Table',
@@ -731,6 +830,7 @@ export default function GuestListManager() {
         toYesNo(household.saveTheDateSent),
         toYesNo(household.plusOneAllowed),
         toYesNo(household.plusOneAccepted),
+        toYesNo(household.tischInvited),
         household.rsvpStatus,
         household.dietaryRestrictions,
         household.table,
@@ -762,6 +862,8 @@ export default function GuestListManager() {
       'Save The Date Sent',
       'Plus One Allowed',
       'Plus One Accepted',
+      'Tisch Invited',
+      'Tisch RSVP',
       'Table',
       'Email',
       'Phone',
@@ -788,6 +890,8 @@ export default function GuestListManager() {
             toYesNo(household.saveTheDateSent),
             toYesNo(household.plusOneAllowed),
             toYesNo(household.plusOneAccepted),
+            toYesNo(household.tischInvited),
+            normalizeTischRsvp('', household.tischInvited),
             household.table,
             household.email,
             household.phone,
@@ -813,6 +917,8 @@ export default function GuestListManager() {
         toYesNo(household.saveTheDateSent),
         toYesNo(household.plusOneAllowed),
         toYesNo(household.plusOneAccepted),
+        toYesNo(household.tischInvited),
+        normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
         household.table,
         household.email,
         household.phone,
@@ -850,7 +956,17 @@ export default function GuestListManager() {
   }
 
   const updateDraftField = (field, value) => {
-    setDraftHousehold((prev) => (prev ? { ...prev, [field]: value } : prev))
+    setDraftHousehold((prev) => {
+      if (!prev) return prev
+      const next = { ...prev, [field]: value }
+      if (field === 'tischInvited') {
+        next.guests = (next.guests || []).map((guest) => ({
+          ...guest,
+          tischRsvp: normalizeTischRsvp(guest.tischRsvp, value),
+        }))
+      }
+      return next
+    })
   }
 
   const updateDraftAddressField = (field, value) => {
@@ -862,17 +978,27 @@ export default function GuestListManager() {
       if (!prev) return prev
       return {
         ...prev,
-        guests: prev.guests.map((guest) => (guest.id === guestId ? { ...guest, ...updates } : guest)),
+        guests: prev.guests.map((guest) =>
+          guest.id === guestId
+            ? { ...guest, ...updates, tischRsvp: normalizeTischRsvp(updates.tischRsvp || guest.tischRsvp, prev.tischInvited) }
+            : guest,
+        ),
       }
     })
   }
 
   const confirmDraftHousehold = () => {
     if (!draftHousehold) return
-    const withSlug = {
+    const primaryGuestName = (draftHousehold.guests?.[0]?.name || '').trim()
+    const shouldReplacePrimary = !primaryGuestName || primaryGuestName.toLowerCase() === 'primary guest'
+    const alignedGuests = (draftHousehold.guests || []).map((guest, index) =>
+      index === 0 && shouldReplacePrimary ? { ...guest, name: draftHousehold.envelopeName } : guest,
+    )
+    const withSlug = ensureDerivedFields({
       ...draftHousehold,
+      guests: alignedGuests,
       slug: slugify(draftHousehold.envelopeName || 'New household'),
-    }
+    })
     insertHousehold(withSlug)
     setDraftHousehold(null)
   }
@@ -1005,6 +1131,58 @@ export default function GuestListManager() {
             >
               Clear filters
             </button>
+            <div className="relative z-30" ref={columnsMenuRef}>
+              <button
+                type="button"
+                onClick={() => setColumnsMenuOpen((open) => !open)}
+                className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+              >
+                Columns
+              </button>
+              {columnsMenuOpen && (
+                <div className="absolute right-0 z-40 mt-2 w-60 rounded-xl border border-sage/30 bg-white p-3 shadow-lg">
+                  <div className="mb-2 flex items-center justify-between text-xs font-semibold text-sage-dark/80">
+                    <button
+                      type="button"
+                      onClick={() => setHiddenColumns(new Set())}
+                      className="rounded-full border border-sage/30 px-2 py-1 transition hover:border-sage hover:text-sage-dark"
+                    >
+                      Show all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHiddenColumns(new Set(tableColumnKeys))}
+                      className="rounded-full border border-sage/30 px-2 py-1 transition hover:border-sage hover:text-sage-dark"
+                    >
+                      Hide all
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {tableColumnKeys.map((key) => (
+                      <label key={key} className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm font-semibold text-sage-dark hover:bg-sage/10">
+                        <input
+                          type="checkbox"
+                          checked={isColumnVisible(key)}
+                          onChange={(event) =>
+                            setHiddenColumns((prev) => {
+                              const next = new Set(prev)
+                              if (event.target.checked) {
+                                next.delete(key)
+                              } else {
+                                next.add(key)
+                              }
+                              return next
+                            })
+                          }
+                          className="h-4 w-4 rounded border border-sage/50 text-sage-dark focus:ring-sage"
+                        />
+                        {toggleableColumnLabels[key]}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="relative z-30" ref={exportMenuRef}>
               <button
                 type="button"
@@ -1041,7 +1219,7 @@ export default function GuestListManager() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[1900px] divide-y divide-sage/20 text-sm">
+          <table className="min-w-[2050px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
                 <th className="sticky left-0 z-40 px-3 py-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.08)]">
@@ -1050,72 +1228,102 @@ export default function GuestListManager() {
                     {renderSortIcon('envelopeName')}
                   </button>
                 </th>
-                <th className="px-3 py-2 w-[150px]">
-                  <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
-                    <span>Invited by</span>
-                    {renderSortIcon('invitedBy')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[150px]">
-                  <button type="button" onClick={() => toggleSort('invitationSent')} className="group flex items-center gap-2">
-                    <span>Invite sent</span>
-                    {renderSortIcon('invitationSent')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[160px]">
-                  <button type="button" onClick={() => toggleSort('saveTheDateSent')} className="group flex items-center gap-2">
-                    <span>Save the date</span>
-                    {renderSortIcon('saveTheDateSent')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[160px]">
-                  <button type="button" onClick={() => toggleSort('plusOneAllowed')} className="group flex items-center gap-2">
-                    <span>+1 allowed</span>
-                    {renderSortIcon('plusOneAllowed')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[170px]">
-                  <button type="button" onClick={() => toggleSort('plusOneAccepted')} className="group flex items-center gap-2">
-                    <span>+1 accepted</span>
-                    {renderSortIcon('plusOneAccepted')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[190px]">
-                  <button type="button" onClick={() => toggleSort('rsvpStatus')} className="group flex items-center gap-2">
-                    <span>RSVP</span>
-                    {renderSortIcon('rsvpStatus')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[190px]">
-                  <button type="button" onClick={() => toggleSort('dietaryRestrictions')} className="group flex items-center gap-2">
-                    <span>Dietary</span>
-                    {renderSortIcon('dietaryRestrictions')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[150px]">
-                  <button type="button" onClick={() => toggleSort('table')} className="group flex items-center gap-2">
-                    <span>Table</span>
-                    {renderSortIcon('table')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[260px]">
-                  <button type="button" onClick={() => toggleSort('email')} className="group flex items-center gap-2">
-                    <span>Email</span>
-                    {renderSortIcon('email')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[170px]">
-                  <button type="button" onClick={() => toggleSort('phone')} className="group flex items-center gap-2">
-                    <span>Phone</span>
-                    {renderSortIcon('phone')}
-                  </button>
-                </th>
-                <th className="px-3 py-2 w-[420px]">
-                  <button type="button" onClick={() => toggleSort('address')} className="group flex items-center gap-2">
-                    <span>Address</span>
-                    {renderSortIcon('address')}
-                  </button>
-                </th>
+                {isColumnVisible('invitedBy') && (
+                  <th className="px-3 py-2 w-[150px]">
+                    <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
+                      <span>Invited by</span>
+                      {renderSortIcon('invitedBy')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('invitationSent') && (
+                  <th className="px-3 py-2 w-[150px]">
+                    <button type="button" onClick={() => toggleSort('invitationSent')} className="group flex items-center gap-2">
+                      <span>Invite sent</span>
+                      {renderSortIcon('invitationSent')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('saveTheDateSent') && (
+                  <th className="px-3 py-2 w-[160px]">
+                    <button type="button" onClick={() => toggleSort('saveTheDateSent')} className="group flex items-center gap-2">
+                      <span>Save the date</span>
+                      {renderSortIcon('saveTheDateSent')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('plusOneAllowed') && (
+                  <th className="px-3 py-2 w-[160px]">
+                    <button type="button" onClick={() => toggleSort('plusOneAllowed')} className="group flex items-center gap-2">
+                      <span>+1 allowed</span>
+                      {renderSortIcon('plusOneAllowed')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('plusOneAccepted') && (
+                  <th className="px-3 py-2 w-[170px]">
+                    <button type="button" onClick={() => toggleSort('plusOneAccepted')} className="group flex items-center gap-2">
+                      <span>+1 accepted</span>
+                      {renderSortIcon('plusOneAccepted')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('tischInvited') && (
+                  <th className="px-3 py-2 w-[170px]">
+                    <button type="button" onClick={() => toggleSort('tischInvited')} className="group flex items-center gap-2">
+                      <span>Tisch</span>
+                      {renderSortIcon('tischInvited')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('rsvpStatus') && (
+                  <th className="px-3 py-2 w-[190px]">
+                    <button type="button" onClick={() => toggleSort('rsvpStatus')} className="group flex items-center gap-2">
+                      <span>RSVP</span>
+                      {renderSortIcon('rsvpStatus')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('dietaryRestrictions') && (
+                  <th className="px-3 py-2 w-[190px]">
+                    <button type="button" onClick={() => toggleSort('dietaryRestrictions')} className="group flex items-center gap-2">
+                      <span>Dietary</span>
+                      {renderSortIcon('dietaryRestrictions')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('table') && (
+                  <th className="px-3 py-2 w-[150px]">
+                    <button type="button" onClick={() => toggleSort('table')} className="group flex items-center gap-2">
+                      <span>Table</span>
+                      {renderSortIcon('table')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('email') && (
+                  <th className="px-3 py-2 w-[260px]">
+                    <button type="button" onClick={() => toggleSort('email')} className="group flex items-center gap-2">
+                      <span>Email</span>
+                      {renderSortIcon('email')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('phone') && (
+                  <th className="px-3 py-2 w-[170px]">
+                    <button type="button" onClick={() => toggleSort('phone')} className="group flex items-center gap-2">
+                      <span>Phone</span>
+                      {renderSortIcon('phone')}
+                    </button>
+                  </th>
+                )}
+                {isColumnVisible('address') && (
+                  <th className="px-3 py-2 w-[420px]">
+                    <button type="button" onClick={() => toggleSort('address')} className="group flex items-center gap-2">
+                      <span>Address</span>
+                      {renderSortIcon('address')}
+                    </button>
+                  </th>
+                )}
                 <th className="sticky right-0 px-3 py-2 w-[110px] text-right bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                   Menu
                 </th>
@@ -1130,123 +1338,158 @@ export default function GuestListManager() {
                     placeholder="Search household"
                   />
                 </th>
-                <th className="px-3 pb-2 w-[150px]">
-                  <select
-                    value={filters.invitedBy}
-                    onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="all">All</option>
-                    {invitedByOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[150px]">
-                  <select
-                    value={filters.invitationSent}
-                    onChange={(event) => handleFilterChange('invitationSent', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="any">Any</option>
-                    <option value="yes">Sent</option>
-                    <option value="no">Not sent</option>
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[160px]">
-                  <select
-                    value={filters.saveTheDateSent}
-                    onChange={(event) => handleFilterChange('saveTheDateSent', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="any">Any</option>
-                    <option value="yes">Sent</option>
-                    <option value="no">Not sent</option>
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[160px]">
-                  <select
-                    value={filters.plusOneAllowed}
-                    onChange={(event) => handleFilterChange('plusOneAllowed', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="any">Any</option>
-                    <option value="yes">Allowed</option>
-                    <option value="no">Not allowed</option>
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[170px]">
-                  <select
-                    value={filters.plusOneAccepted}
-                    onChange={(event) => handleFilterChange('plusOneAccepted', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="any">Any</option>
-                    <option value="yes">Accepted</option>
-                    <option value="no">Not accepted</option>
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[190px]">
-                  <select
-                    value={filters.rsvpStatus}
-                    onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
-                    className={filterInputClass}
-                  >
-                    <option value="all">All</option>
-                    {rsvpOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </th>
-                <th className="px-3 pb-2 w-[190px]">
-                  <input
-                    type="text"
-                    value={filters.dietaryRestrictions}
-                    onChange={(event) => handleFilterChange('dietaryRestrictions', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Filter dietary"
-                  />
-                </th>
-                <th className="px-3 pb-2 w-[150px]">
-                  <input
-                    type="text"
-                    value={filters.table}
-                    onChange={(event) => handleFilterChange('table', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Table"
-                  />
-                </th>
-                <th className="px-3 pb-2 w-[260px]">
-                  <input
-                    type="text"
-                    value={filters.email}
-                    onChange={(event) => handleFilterChange('email', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Email"
-                  />
-                </th>
-                <th className="px-3 pb-2 w-[170px]">
-                  <input
-                    type="text"
-                    value={filters.phone}
-                    onChange={(event) => handleFilterChange('phone', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Phone"
-                  />
-                </th>
-                <th className="px-3 pb-2 w-[420px]">
-                  <input
-                    type="text"
-                    value={filters.address}
-                    onChange={(event) => handleFilterChange('address', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Address search"
-                  />
-                </th>
+                {isColumnVisible('invitedBy') && (
+                  <th className="px-3 pb-2 w-[150px]">
+                    <select
+                      value={filters.invitedBy}
+                      onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="all">All</option>
+                      {invitedByOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('invitationSent') && (
+                  <th className="px-3 pb-2 w-[150px]">
+                    <select
+                      value={filters.invitationSent}
+                      onChange={(event) => handleFilterChange('invitationSent', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="any">Any</option>
+                      <option value="yes">Sent</option>
+                      <option value="no">Not sent</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('saveTheDateSent') && (
+                  <th className="px-3 pb-2 w-[160px]">
+                    <select
+                      value={filters.saveTheDateSent}
+                      onChange={(event) => handleFilterChange('saveTheDateSent', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="any">Any</option>
+                      <option value="yes">Sent</option>
+                      <option value="no">Not sent</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('plusOneAllowed') && (
+                  <th className="px-3 pb-2 w-[160px]">
+                    <select
+                      value={filters.plusOneAllowed}
+                      onChange={(event) => handleFilterChange('plusOneAllowed', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="any">Any</option>
+                      <option value="yes">Allowed</option>
+                      <option value="no">Not allowed</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('plusOneAccepted') && (
+                  <th className="px-3 pb-2 w-[170px]">
+                    <select
+                      value={filters.plusOneAccepted}
+                      onChange={(event) => handleFilterChange('plusOneAccepted', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="any">Any</option>
+                      <option value="yes">Accepted</option>
+                      <option value="no">Not accepted</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('tischInvited') && (
+                  <th className="px-3 pb-2 w-[170px]">
+                    <select
+                      value={filters.tischInvited}
+                      onChange={(event) => handleFilterChange('tischInvited', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="any">Any</option>
+                      <option value="yes">Invited</option>
+                      <option value="no">Not invited</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('rsvpStatus') && (
+                  <th className="px-3 pb-2 w-[190px]">
+                    <select
+                      value={filters.rsvpStatus}
+                      onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      <option value="all">All</option>
+                      {rsvpOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('dietaryRestrictions') && (
+                  <th className="px-3 pb-2 w-[190px]">
+                    <input
+                      type="text"
+                      value={filters.dietaryRestrictions}
+                      onChange={(event) => handleFilterChange('dietaryRestrictions', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Filter dietary"
+                    />
+                  </th>
+                )}
+                {isColumnVisible('table') && (
+                  <th className="px-3 pb-2 w-[150px]">
+                    <input
+                      type="text"
+                      value={filters.table}
+                      onChange={(event) => handleFilterChange('table', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Table"
+                    />
+                  </th>
+                )}
+                {isColumnVisible('email') && (
+                  <th className="px-3 pb-2 w-[260px]">
+                    <input
+                      type="text"
+                      value={filters.email}
+                      onChange={(event) => handleFilterChange('email', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Email"
+                    />
+                  </th>
+                )}
+                {isColumnVisible('phone') && (
+                  <th className="px-3 pb-2 w-[170px]">
+                    <input
+                      type="text"
+                      value={filters.phone}
+                      onChange={(event) => handleFilterChange('phone', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Phone"
+                    />
+                  </th>
+                )}
+                {isColumnVisible('address') && (
+                  <th className="px-3 pb-2 w-[420px]">
+                    <input
+                      type="text"
+                      value={filters.address}
+                      onChange={(event) => handleFilterChange('address', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Address search"
+                    />
+                  </th>
+                )}
                 <th className="sticky right-0 px-3 pb-2 w-[110px] bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20" />
               </tr>
             </thead>
@@ -1300,141 +1543,176 @@ export default function GuestListManager() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2 w-[150px]">
-                        <select
-                          value={household.invitedBy}
-                          onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
-                          className={tableSelectClass}
-                        >
-                          {invitedByOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 w-[150px]">
-                        <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                          <input
-                            type="checkbox"
-                            checked={household.invitationSent}
-                            onChange={() => updateHousehold(household.id, { invitationSent: !household.invitationSent })}
-                            className={checkboxClass}
-                          />
-                          Sent
-                        </label>
-                      </td>
-                      <td className="px-3 py-2 w-[160px]">
-                        <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                          <input
-                            type="checkbox"
-                            checked={household.saveTheDateSent}
-                            onChange={() => updateHousehold(household.id, { saveTheDateSent: !household.saveTheDateSent })}
-                            className={checkboxClass}
-                          />
-                          Sent
-                        </label>
-                      </td>
-                      <td className="px-3 py-2 w-[160px]">
-                        <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                          <input
-                            type="checkbox"
-                            checked={household.plusOneAllowed}
-                            onChange={() =>
-                              updateHousehold(household.id, {
-                                plusOneAllowed: !household.plusOneAllowed,
-                                plusOneAccepted: household.plusOneAllowed ? false : household.plusOneAccepted,
-                              })
-                            }
-                            className={checkboxClass}
-                          />
-                          Allowed
-                        </label>
-                      </td>
-                      <td className="px-3 py-2 w-[170px]">
-                        <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                          <input
-                            type="checkbox"
-                            checked={household.plusOneAccepted}
-                            onChange={() =>
-                              updateHousehold(household.id, {
-                                plusOneAccepted: household.plusOneAllowed ? !household.plusOneAccepted : false,
-                              })
-                            }
-                            className={checkboxClass}
-                            disabled={!household.plusOneAllowed || locked}
-                          />
-                          Accepted
-                        </label>
-                      </td>
-                      <td className="px-3 py-2 w-[190px]">
-                        <select
-                          value={household.rsvpStatus}
-                          onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
-                          className={tableSelectClass}
-                          disabled={locked}
-                        >
-                          {rsvpOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 w-[190px]">
-                        <select
-                          value={household.dietaryRestrictions}
-                          onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
-                          className={tableSelectClass}
-                        >
-                          {dietaryOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2 w-[150px]">
-                        <input
-                          type="text"
-                          value={household.table}
-                          onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
-                          className={tableInputClass}
-                          placeholder="Table"
-                        />
-                      </td>
-                      <td className="px-3 py-2 w-[260px]">
-                        <input
-                          type="email"
-                          value={household.email}
-                          onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
-                          className={tableInputClass}
-                          placeholder="contact@email.com"
-                        />
-                      </td>
-                      <td className="px-3 py-2 w-[170px]">
-                        <input
-                          type="tel"
-                          value={household.phone}
-                          onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
-                          className={tableInputClass}
-                          placeholder="(555) 123-4567"
-                        />
-                      </td>
-                      <td className="px-3 py-2 w-[420px]">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm text-charcoal/80" title={formatAddress(household.address)}>
-                            {formatAddress(household.address)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setAddressModalId(household.id)}
-                            className="rounded-full border border-sage/40 px-2 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                      {isColumnVisible('invitedBy') && (
+                        <td className="px-3 py-2 w-[150px]">
+                          <select
+                            value={household.invitedBy}
+                            onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
+                            className={tableSelectClass}
                           >
-                            View / edit
-                          </button>
-                        </div>
-                      </td>
+                            {invitedByOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
+                      {isColumnVisible('invitationSent') && (
+                        <td className="px-3 py-2 w-[150px]">
+                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                            <input
+                              type="checkbox"
+                              checked={household.invitationSent}
+                              onChange={() => updateHousehold(household.id, { invitationSent: !household.invitationSent })}
+                              className={checkboxClass}
+                            />
+                            Sent
+                          </label>
+                        </td>
+                      )}
+                      {isColumnVisible('saveTheDateSent') && (
+                        <td className="px-3 py-2 w-[160px]">
+                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                            <input
+                              type="checkbox"
+                              checked={household.saveTheDateSent}
+                              onChange={() => updateHousehold(household.id, { saveTheDateSent: !household.saveTheDateSent })}
+                              className={checkboxClass}
+                            />
+                            Sent
+                          </label>
+                        </td>
+                      )}
+                      {isColumnVisible('plusOneAllowed') && (
+                        <td className="px-3 py-2 w-[160px]">
+                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                            <input
+                              type="checkbox"
+                              checked={household.plusOneAllowed}
+                              onChange={() =>
+                                updateHousehold(household.id, {
+                                  plusOneAllowed: !household.plusOneAllowed,
+                                  plusOneAccepted: household.plusOneAllowed ? false : household.plusOneAccepted,
+                                })
+                              }
+                              className={checkboxClass}
+                            />
+                            Allowed
+                          </label>
+                        </td>
+                      )}
+                      {isColumnVisible('plusOneAccepted') && (
+                        <td className="px-3 py-2 w-[170px]">
+                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                            <input
+                              type="checkbox"
+                              checked={household.plusOneAccepted}
+                              onChange={() =>
+                                updateHousehold(household.id, {
+                                  plusOneAccepted: household.plusOneAllowed ? !household.plusOneAccepted : false,
+                                })
+                              }
+                              className={checkboxClass}
+                              disabled={!household.plusOneAllowed || locked}
+                            />
+                            Accepted
+                          </label>
+                        </td>
+                      )}
+                      {isColumnVisible('tischInvited') && (
+                        <td className="px-3 py-2 w-[170px]">
+                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                            <input
+                              type="checkbox"
+                              checked={household.tischInvited}
+                              onChange={() => updateHousehold(household.id, { tischInvited: !household.tischInvited })}
+                              className={checkboxClass}
+                            />
+                            Invited
+                          </label>
+                        </td>
+                      )}
+                      {isColumnVisible('rsvpStatus') && (
+                        <td className="px-3 py-2 w-[190px]">
+                          <select
+                            value={household.rsvpStatus}
+                            onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
+                            className={tableSelectClass}
+                            disabled={locked}
+                          >
+                            {rsvpOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
+                      {isColumnVisible('dietaryRestrictions') && (
+                        <td className="px-3 py-2 w-[190px]">
+                          <select
+                            value={household.dietaryRestrictions}
+                            onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
+                            className={tableSelectClass}
+                          >
+                            {dietaryOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
+                      {isColumnVisible('table') && (
+                        <td className="px-3 py-2 w-[150px]">
+                          <input
+                            type="text"
+                            value={household.table}
+                            onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
+                            className={tableInputClass}
+                            placeholder="Table"
+                          />
+                        </td>
+                      )}
+                      {isColumnVisible('email') && (
+                        <td className="px-3 py-2 w-[260px]">
+                          <input
+                            type="email"
+                            value={household.email}
+                            onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
+                            className={tableInputClass}
+                            placeholder="contact@email.com"
+                          />
+                        </td>
+                      )}
+                      {isColumnVisible('phone') && (
+                        <td className="px-3 py-2 w-[170px]">
+                          <input
+                            type="tel"
+                            value={household.phone}
+                            onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
+                            className={tableInputClass}
+                            placeholder="(555) 123-4567"
+                          />
+                        </td>
+                      )}
+                      {isColumnVisible('address') && (
+                        <td className="px-3 py-2 w-[420px]">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm text-charcoal/80" title={formatAddress(household.address)}>
+                              {formatAddress(household.address)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setAddressModalId(household.id)}
+                              className="rounded-full border border-sage/40 px-2 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                            >
+                              View / edit
+                            </button>
+                          </div>
+                        </td>
+                      )}
                       <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-10">
                         <div className="relative inline-block text-left z-30">
                           <button
@@ -1484,43 +1762,71 @@ export default function GuestListManager() {
                               placeholder="Guest name"
                             />
                           </td>
-                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[190px]">
-                            <select
-                              value={guest.rsvpStatus}
-                              onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
-                              className={tableSelectClass}
-                              disabled={locked}
-                            >
-                              {rsvpOptions.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2 w-[190px]">
-                            <select
-                              value={guest.dietary}
-                              onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
-                              className={tableSelectClass}
-                              disabled={locked}
-                            >
-                              {dietaryOptions.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[260px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>
-                          <td className="px-3 py-2 w-[420px] text-sm text-charcoal/60">—</td>
+                          {isColumnVisible('invitedBy') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('invitationSent') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('saveTheDateSent') && <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('plusOneAllowed') && <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('plusOneAccepted') && <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('tischInvited') && (
+                            <td className="px-3 py-2 w-[170px]">
+                              {household.tischInvited ? (
+                                <select
+                                  value={guest.tischRsvp}
+                                  onChange={(event) =>
+                                    updateGuest(household.id, guest.id, { tischRsvp: event.target.value })
+                                  }
+                                  className={tableSelectClass}
+                                  disabled={locked}
+                                >
+                                  {tischRsvpOptions
+                                    .filter((option) => option !== 'Not invited')
+                                    .map((option) => (
+                                      <option key={option} value={option}>
+                                        {option}
+                                      </option>
+                                    ))}
+                                </select>
+                              ) : (
+                                <span className="text-sm text-charcoal/60">Not invited</span>
+                              )}
+                            </td>
+                          )}
+                          {isColumnVisible('rsvpStatus') && (
+                            <td className="px-3 py-2 w-[190px]">
+                              <select
+                                value={guest.rsvpStatus}
+                                onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
+                                className={tableSelectClass}
+                                disabled={locked}
+                              >
+                                {rsvpOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {isColumnVisible('dietaryRestrictions') && (
+                            <td className="px-3 py-2 w-[190px]">
+                              <select
+                                value={guest.dietary}
+                                onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
+                                className={tableSelectClass}
+                                disabled={locked}
+                              >
+                                {dietaryOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
+                          {isColumnVisible('table') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('email') && <td className="px-3 py-2 w-[260px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('phone') && <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>}
+                          {isColumnVisible('address') && <td className="px-3 py-2 w-[420px] text-sm text-charcoal/60">—</td>}
                           <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-sage/10 shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
                             <div className="flex justify-end">
                               <button
@@ -1539,7 +1845,7 @@ export default function GuestListManager() {
               })}
               {visibleHouseholds.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-3 py-6 text-center text-sm text-charcoal/70">
+                  <td colSpan={visibleColumnCount} className="px-3 py-6 text-center text-sm text-charcoal/70">
                     No households match the current filters.
                   </td>
                 </tr>
@@ -1727,6 +2033,15 @@ export default function GuestListManager() {
                       +1 accepted
                     </label>
                   </div>
+                  <label className="flex items-center gap-2 text-sm text-charcoal/80">
+                    <input
+                      type="checkbox"
+                      checked={draftHousehold.tischInvited}
+                      onChange={() => updateDraftField('tischInvited', !draftHousehold.tischInvited)}
+                      className={checkboxClass}
+                    />
+                    Invite to tisch
+                  </label>
                   <label className="block text-xs font-semibold text-sage-dark/80">
                     RSVP
                     <select
