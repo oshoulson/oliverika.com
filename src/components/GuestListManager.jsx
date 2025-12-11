@@ -347,6 +347,7 @@ export default function GuestListManager() {
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false)
+  const [showSeatingView, setShowSeatingView] = useState(false)
   const [hiddenColumns, setHiddenColumns] = useState(loadHiddenColumns)
   const [sortConfig, setSortConfig] = useState({ key: 'envelopeName', direction: 'asc' })
   const [filters, setFilters] = useState(createDefaultFilters)
@@ -772,6 +773,51 @@ export default function GuestListManager() {
     return sorted
   }, [filters, households, sortConfig])
 
+  const seatingTables = useMemo(() => {
+    const tableMap = new Map()
+    households.forEach((household) => {
+      const householdTable = (household.table || '').trim()
+      const defaultTable = householdTable || 'Unassigned'
+      const guests = household.guests || []
+      ;(household.guests || []).forEach((guest) => {
+        const tableName = (guest.table || defaultTable || '').trim() || 'Unassigned'
+        const list = tableMap.get(tableName) || []
+        list.push({
+          id: guest.id,
+          name: guest.name || 'Guest',
+          household: household.envelopeName || '',
+          table: tableName,
+          isPlusOne: guest.type === 'plus-one',
+        })
+        tableMap.set(tableName, list)
+      })
+      const hasPlusOneGuest = guests.some((guest) => guest.type === 'plus-one')
+      if (household.plusOneAllowed && household.plusOneAccepted && !hasPlusOneGuest) {
+        const plusOneTable = defaultTable || 'Unassigned'
+        const list = tableMap.get(plusOneTable) || []
+        list.push({
+          id: `${household.id}-plus-one`,
+          name: 'Plus One',
+          household: household.envelopeName || '',
+          table: plusOneTable,
+          isPlusOne: true,
+        })
+        tableMap.set(plusOneTable, list)
+      }
+    })
+    const entries = Array.from(tableMap.entries()).map(([table, guests]) => ({ table, guests }))
+    entries.sort((a, b) => {
+      if (a.table === 'Unassigned') return 1
+      if (b.table === 'Unassigned') return -1
+      return a.table.localeCompare(b.table)
+    })
+    return entries
+  }, [households])
+  const unassignedCount = useMemo(() => {
+    const unassigned = seatingTables.find((entry) => entry.table === 'Unassigned')
+    return unassigned?.guests?.length || 0
+  }, [seatingTables])
+
   const downloadCsv = (headers, rows, filename) => {
     const csvContent = [headers, ...rows]
       .map((row) =>
@@ -1007,6 +1053,82 @@ export default function GuestListManager() {
     setDraftHousehold(null)
   }
 
+  const renderSeatingTables = () => {
+    const initialsForName = (name) => {
+      const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+      if (parts.length >= 2) {
+        return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase()
+      }
+      const single = parts[0] || ''
+      return single.slice(0, 2).toUpperCase() || '??'
+    }
+
+    const assignedTables = seatingTables.filter((entry) => entry.table !== 'Unassigned')
+
+    if (assignedTables.length === 0) {
+      return (
+        <div className="rounded-2xl border border-sage/30 bg-white/80 p-6 text-center text-sm text-charcoal/70">
+          No assigned tables yet. Add table names to households to see them here.
+          {unassignedCount > 0 && (
+            <p className="mt-2 text-xs font-semibold text-sage-dark">Unassigned guests: {unassignedCount}</p>
+          )}
+        </div>
+      )
+    }
+
+    const getSeatPosition = (index, total) => {
+      const angle = (index / total) * 2 * Math.PI - Math.PI / 2
+      const radiusPercent = 38
+      return {
+        left: `${50 + Math.cos(angle) * radiusPercent}%`,
+        top: `${50 + Math.sin(angle) * radiusPercent}%`,
+      }
+    }
+
+    return (
+      <div className="mt-4 flex flex-wrap gap-6">
+        {assignedTables.map((entry, index) => {
+          const offsetClass = index % 2 === 1 ? 'md:translate-x-10' : ''
+          const guests = entry.guests || []
+          const count = guests.length || 1
+          return (
+            <div
+              key={entry.table}
+              className={`relative w-full max-w-xs flex-1 rounded-2xl border border-sage/30 bg-white/85 p-4 shadow-frame ${offsetClass}`}
+            >
+              <p className="text-xs uppercase tracking-[0.35em] text-sage-dark/70">{entry.table}</p>
+              <div className="relative mx-auto mt-4 h-72 w-72">
+                <div className="absolute inset-0 rounded-full border-2 border-sage/40 bg-sage/5" />
+                <div className="absolute inset-[18%] rounded-full border border-sage/20 bg-white/80 shadow-inner" />
+                <div className="absolute left-1/2 top-1/2 z-10 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-sage text-white shadow-lg">
+                  <span className="text-xl font-semibold">{count}</span>
+                </div>
+                {guests.map((guest, seatIndex) => {
+                  const pos = getSeatPosition(seatIndex, count)
+                  const badgeText = guest.isPlusOne ? '+1' : initialsForName(guest.name)
+                  return (
+                    <div
+                      key={`${guest.id}-${seatIndex}`}
+                      className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+                      style={pos}
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-b from-sage to-sage-dark text-xs font-semibold text-white shadow-lg shadow-sage/30">
+                        {badgeText}
+                      </div>
+                      <span className="mt-1 max-w-[120px] truncate rounded-full bg-white/90 px-2 py-1 text-[0.7rem] font-semibold text-sage-dark shadow-sm ring-1 ring-sage/20">
+                        {guest.name}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   if (!isAuthorized) {
     return (
       <main className="mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center px-4 text-charcoal">
@@ -1071,13 +1193,20 @@ export default function GuestListManager() {
             {remoteStatus === 'loading' && 'Loading…'}
             {remoteStatus === 'saving' && 'Saving…'}
             {remoteStatus === 'saved' && 'Saved'}
-            {remoteStatus === 'error' && 'Offline (not saved)'}
-            {remoteStatus === 'idle' && 'Local only'}
-            {remoteStatus === 'ready' && 'Ready'}
-          </span>
-          {remoteError && <span className="text-xs font-semibold text-rose-700">{remoteError}</span>}
-        </div>
+          {remoteStatus === 'error' && 'Offline (not saved)'}
+          {remoteStatus === 'idle' && 'Local only'}
+          {remoteStatus === 'ready' && 'Ready'}
+        </span>
+        {remoteError && <span className="text-xs font-semibold text-rose-700">{remoteError}</span>}
+        <button
+          type="button"
+          onClick={() => setShowSeatingView(true)}
+          className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+        >
+          Seating view
+        </button>
       </div>
+    </div>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-sage/30 bg-white/80 p-4 shadow-frame">
@@ -1854,6 +1983,43 @@ export default function GuestListManager() {
           </table>
         </div>
       </div>
+      {showSeatingView && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowSeatingView(false)}
+            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
+            aria-label="Close seating view"
+          />
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto px-4 pb-12 pt-14">
+            <div className="w-full max-w-6xl rounded-2xl border border-sage/30 bg-white/95 p-6 shadow-2xl shadow-sage/30">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sage/20 pb-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.4em] text-sage-dark/70">Seating view</p>
+                  <p className="text-sm text-charcoal/70">
+                    Circles are grouped by guest table. Guests inherit their household table unless a guest-level table is set.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {unassignedCount > 0 && (
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm">
+                      Unassigned: {unassignedCount}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowSeatingView(false)}
+                    className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              {renderSeatingTables()}
+            </div>
+          </div>
+        </>
+      )}
       {addressModalHousehold && (
         <>
           <button
