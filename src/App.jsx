@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import heroImage from './assets/hero.jpg'
+const heroImage = '/STDEdit.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
 import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, slugify } from './components/GuestListManager.jsx'
 
