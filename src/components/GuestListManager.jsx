@@ -1,9 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { readJsonCookie, writeCookie, deleteCookie } from '../utils/cookies.js'
 /* eslint-disable react-refresh/only-export-components */
 
 const AUTH_STORAGE_KEY = 'oliverikaGuestListAuth'
 export const DATA_STORAGE_KEY = 'oliverikaGuestListData'
 const HIDDEN_COLUMNS_KEY = 'oliverikaGuestHiddenColumns'
+const VIEW_PREFS_KEY = 'oliverikaGuestListViewPrefs'
 const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
 const FUNCTIONS_BASE = '/.netlify/functions'
 
@@ -196,6 +198,7 @@ const toggleableColumnLabels = {
   address: 'Address',
 }
 const tableColumnKeys = Object.keys(toggleableColumnLabels)
+const sortableColumnKeys = ['envelopeName', ...tableColumnKeys]
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
 const selectClass =
@@ -232,6 +235,122 @@ const createDefaultFilters = () => ({
   phone: '',
   address: '',
 })
+
+const sanitizeViewPrefs = (prefs) => {
+  if (!prefs || typeof prefs !== 'object') return null
+  const sortConfig = prefs.sortConfig && typeof prefs.sortConfig === 'object' ? prefs.sortConfig : {}
+  const sortKey = typeof sortConfig.key === 'string' && sortableColumnKeys.includes(sortConfig.key) ? sortConfig.key : 'envelopeName'
+  const sortDirection = sortConfig.direction === 'desc' ? 'desc' : 'asc'
+
+  const defaultFilters = createDefaultFilters()
+  const rawFilters = prefs.filters && typeof prefs.filters === 'object' ? prefs.filters : {}
+  const filters = Object.fromEntries(
+    Object.entries(defaultFilters).map(([key, defaultValue]) => {
+      const incoming = rawFilters[key]
+      return [key, typeof defaultValue === 'string' ? String(incoming ?? defaultValue) : defaultValue]
+    }),
+  )
+
+  if (!['all', ...invitedByOptions].includes(filters.invitedBy)) filters.invitedBy = 'all'
+  if (!['any', 'yes', 'no'].includes(filters.invitationSent)) filters.invitationSent = 'any'
+  if (!['any', 'yes', 'no'].includes(filters.saveTheDateSent)) filters.saveTheDateSent = 'any'
+  if (!['any', 'yes', 'no'].includes(filters.plusOneAllowed)) filters.plusOneAllowed = 'any'
+  if (!['any', 'yes', 'no'].includes(filters.plusOneAccepted)) filters.plusOneAccepted = 'any'
+  if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
+  if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
+
+  const expandedRaw = prefs.expanded && typeof prefs.expanded === 'object' ? prefs.expanded : null
+  const expandedMode = expandedRaw?.mode === 'none' ? 'none' : expandedRaw?.mode === 'all' ? 'all' : null
+  const expandedIds = Array.isArray(expandedRaw?.ids) ? expandedRaw.ids.filter((id) => typeof id === 'string') : []
+
+  return {
+    filters,
+    sortConfig: { key: sortKey, direction: sortDirection },
+    expanded: expandedMode ? { mode: expandedMode, ids: expandedIds.slice(0, 250) } : null,
+    showSeatingView: typeof prefs.showSeatingView === 'boolean' ? prefs.showSeatingView : null,
+  }
+}
+
+const loadViewPrefs = () => {
+  if (typeof window === 'undefined') return null
+  const fromCookie = sanitizeViewPrefs(readJsonCookie(VIEW_PREFS_KEY))
+  if (fromCookie) return fromCookie
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(VIEW_PREFS_KEY) || 'null')
+    return sanitizeViewPrefs(stored)
+  } catch {
+    return null
+  }
+}
+
+const createExpandedPref = (households, expandedSet) => {
+  const expandedIds = []
+  const collapsedIds = []
+  for (const household of households || []) {
+    const id = household?.id
+    if (!id) continue
+    if (expandedSet?.has?.(id)) {
+      expandedIds.push(id)
+    } else {
+      collapsedIds.push(id)
+    }
+  }
+
+  if (expandedIds.length <= collapsedIds.length) {
+    return { mode: 'none', ids: expandedIds }
+  }
+  return { mode: 'all', ids: collapsedIds }
+}
+
+const applyExpandedPref = (households, expandedPref) => {
+  const allIds = (households || []).map((household) => household.id)
+  const allSet = new Set(allIds)
+
+  if (!expandedPref || !expandedPref.mode) {
+    return new Set(allIds)
+  }
+
+  const ids = Array.isArray(expandedPref.ids) ? expandedPref.ids : []
+  if (expandedPref.mode === 'none') {
+    const next = new Set()
+    ids.forEach((id) => {
+      if (allSet.has(id)) next.add(id)
+    })
+    return next
+  }
+
+  const next = new Set(allIds)
+  ids.forEach((id) => next.delete(id))
+  return next
+}
+
+const persistViewPrefs = (prefs) => {
+  if (typeof window === 'undefined') return
+  const payload = { v: 1, ...prefs }
+  const maxCookieLength = 3800
+
+  const attemptCookieWrite = (candidate) => {
+    try {
+      const encoded = encodeURIComponent(JSON.stringify(candidate))
+      if (encoded.length > maxCookieLength) return false
+      writeCookie(VIEW_PREFS_KEY, encoded, { maxAgeSeconds: 60 * 60 * 24 * 365 })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const cookieWritten = attemptCookieWrite(payload) || attemptCookieWrite({ ...payload, expanded: payload.expanded ? { ...payload.expanded, ids: [] } : null })
+  if (!cookieWritten) {
+    deleteCookie(VIEW_PREFS_KEY)
+  }
+
+  try {
+    window.localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(payload))
+  } catch {
+    // ignore
+  }
+}
 
 const toYesNo = (value) => (value ? 'Yes' : 'No')
 const formatAddress = (address = {}) => {
@@ -336,25 +455,28 @@ export const loadInitialHouseholds = () => {
 
 export default function GuestListManager() {
   const initialHouseholds = useMemo(loadInitialHouseholds, [])
+  const initialViewPrefs = useMemo(loadViewPrefs, [])
   const [isAuthorized, setIsAuthorized] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [authError, setAuthError] = useState('')
   const [households, setHouseholds] = useState(initialHouseholds)
   const householdsRef = useRef(initialHouseholds)
-  const [expandedHouseholds, setExpandedHouseholds] = useState(() => new Set(initialHouseholds.map((household) => household.id)))
+  const [expandedHouseholds, setExpandedHouseholds] = useState(() => applyExpandedPref(initialHouseholds, initialViewPrefs?.expanded))
+  const expandedHouseholdsRef = useRef(expandedHouseholds)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false)
-  const [showSeatingView, setShowSeatingView] = useState(false)
+  const [showSeatingView, setShowSeatingView] = useState(Boolean(initialViewPrefs?.showSeatingView))
   const [hiddenColumns, setHiddenColumns] = useState(loadHiddenColumns)
-  const [sortConfig, setSortConfig] = useState({ key: 'envelopeName', direction: 'asc' })
-  const [filters, setFilters] = useState(createDefaultFilters)
+  const [sortConfig, setSortConfig] = useState(initialViewPrefs?.sortConfig || { key: 'envelopeName', direction: 'asc' })
+  const [filters, setFilters] = useState(() => ({ ...createDefaultFilters(), ...(initialViewPrefs?.filters || {}) }))
   const [showFloatingAdd, setShowFloatingAdd] = useState(false)
   const [draftHousehold, setDraftHousehold] = useState(null)
   const [addressModalId, setAddressModalId] = useState(null)
   const saveTimer = useRef(null)
+  const viewPrefsTimer = useRef(null)
   const isSavingRef = useRef(false)
   const exportMenuRef = useRef(null)
   const columnsMenuRef = useRef(null)
@@ -370,6 +492,10 @@ export default function GuestListManager() {
       console.warn('Unable to read guest list auth flag', error)
     }
   }, [])
+
+  useEffect(() => {
+    expandedHouseholdsRef.current = expandedHouseholds
+  }, [expandedHouseholds])
 
   useEffect(() => {
     householdsRef.current = households
@@ -394,6 +520,24 @@ export default function GuestListManager() {
   }, [hiddenColumns])
 
   useEffect(() => {
+    if (typeof window === 'undefined') return () => {}
+    if (viewPrefsTimer.current) {
+      clearTimeout(viewPrefsTimer.current)
+    }
+
+    viewPrefsTimer.current = setTimeout(() => {
+      const expandedPref = createExpandedPref(householdsRef.current, expandedHouseholdsRef.current)
+      persistViewPrefs({ filters, sortConfig, expanded: expandedPref, showSeatingView })
+    }, 200)
+
+    return () => {
+      if (viewPrefsTimer.current) {
+        clearTimeout(viewPrefsTimer.current)
+      }
+    }
+  }, [filters, sortConfig, expandedHouseholds, showSeatingView])
+
+  useEffect(() => {
     let cancelled = false
     const loadRemote = async () => {
       setRemoteStatus('loading')
@@ -410,7 +554,10 @@ export default function GuestListManager() {
         const mapped = data.households.map(ensureDerivedFields)
         if (!cancelled) {
           setHouseholds(mapped)
-          setExpandedHouseholds(new Set(mapped.map((household) => household.id)))
+          setExpandedHouseholds(() => {
+            const expandedPref = createExpandedPref(householdsRef.current, expandedHouseholdsRef.current)
+            return applyExpandedPref(mapped, expandedPref)
+          })
           try {
             window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(mapped))
           } catch (error) {
@@ -1625,18 +1772,21 @@ export default function GuestListManager() {
             <tbody className="divide-y divide-sage/20">
               {visibleHouseholds.map((household) => {
                 const isExpanded = expandedHouseholds.has(household.id)
+                const isMenuOpen = openMenuId === household.id
                 const locked = household.rsvpLocked
                 const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
                 const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
                 return (
                   <Fragment key={household.id}>
                     <tr
-                      className={`relative z-10 bg-white shadow-lg shadow-sage/25 transition duration-200 ${
+                      className={`relative ${isMenuOpen ? 'z-40' : 'z-10'} bg-white shadow-lg shadow-sage/25 transition duration-200 ${
                         isExpanded ? 'ring-1 ring-sage/15' : ''
                       }`}
                       style={isExpanded ? { animation: 'householdPulse 180ms ease-out' } : undefined}
                     >
-                      <td className="sticky left-0 z-10 px-3 py-2 w-[260px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]">
+                      <td
+                        className={`sticky left-0 ${isMenuOpen ? 'z-40' : 'z-10'} px-3 py-2 w-[260px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]`}
+                      >
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -1842,7 +1992,11 @@ export default function GuestListManager() {
                           </div>
                         </td>
                       )}
-                      <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-10">
+                      <td
+                        className={`sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] ${
+                          isMenuOpen ? 'z-40' : 'z-10'
+                        }`}
+                      >
                         <div className="relative inline-block text-left z-30">
                           <button
                             type="button"
