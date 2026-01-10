@@ -437,8 +437,9 @@ const ensureDerivedFields = (household) => ({
   ...household,
   customSlug: (() => {
     const derived = slugify(household.envelopeName || 'household')
-    const incoming = normalizeSlug(household.customSlug)
-    if (incoming) return incoming
+    const incomingRaw = String(household.customSlug ?? '').trim()
+    const incomingKey = normalizeSlug(incomingRaw)
+    if (incomingKey) return incomingRaw
     const legacy = normalizeSlug(household.slug)
     return legacy && legacy !== derived ? legacy : ''
   })(),
@@ -796,7 +797,7 @@ export default function GuestListManager() {
         const next = { ...household, ...updates }
         if (typeof updates.customSlug === 'string') {
           const normalizedCustom = normalizeSlug(updates.customSlug)
-          next.customSlug = normalizedCustom
+          next.customSlug = updates.customSlug
           next.slug = normalizedCustom || slugify(next.envelopeName || 'household')
         }
         if (typeof updates.envelopeName === 'string') {

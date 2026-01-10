@@ -110,7 +110,7 @@ const getHouseholdSlugKey = (household) =>
   normalizeSlug(household?.customSlug ?? household?.slug) || slugify(household?.envelopeName || household?.name || 'household')
 const normalizeHousehold = (household) => ({
   ...household,
-  customSlug: normalizeSlug(household?.customSlug) || '',
+  customSlug: typeof household?.customSlug === 'string' ? household.customSlug : '',
   slug: getHouseholdSlugKey(household),
   tischInvited: Boolean(household.tischInvited),
   plusOneAccepted: Boolean(household.plusOneAccepted),
