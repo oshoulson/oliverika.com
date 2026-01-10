@@ -1,7 +1,9 @@
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { getS3Client, BUCKET, KEY_PREFIX_WITH_SLASH } from '../../server/s3Client.js'
 
-const KEY = `${KEY_PREFIX_WITH_SLASH || ''}guest-list.json`
+const LEGACY_KEY = `${KEY_PREFIX_WITH_SLASH || ''}guest-list.json`
+const HOUSEHOLDS_PREFIX = `${KEY_PREFIX_WITH_SLASH || ''}guest-list/households/`
+const INDEX_KEY = `${KEY_PREFIX_WITH_SLASH || ''}guest-list/index.json`
 const headers = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -27,15 +29,107 @@ const bad = (statusCode, message, extra = {}) => ({
   body: JSON.stringify({ error: message, ...extra }),
 })
 
+const householdKeyForId = (id) => `${HOUSEHOLDS_PREFIX}${encodeURIComponent(String(id))}.json`
+const householdIdFromKey = (key) => {
+  if (typeof key !== 'string') return null
+  if (!key.startsWith(HOUSEHOLDS_PREFIX) || !key.endsWith('.json')) return null
+  const encoded = key.slice(HOUSEHOLDS_PREFIX.length, -'.json'.length)
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    return encoded
+  }
+}
+
+const getJsonObject = async (key) => {
+  try {
+    const response = await getS3Client().send(
+      new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+      }),
+    )
+    const text = await streamToString(response.Body)
+    return JSON.parse(text || 'null')
+  } catch (error) {
+    const status = error?.$metadata?.httpStatusCode || 500
+    if (status === 404) return null
+    throw error
+  }
+}
+
+const listHouseholdObjects = async () => {
+  const keys = []
+  let continuationToken = undefined
+  let newestLastModified = null
+
+  while (true) {
+    const response = await getS3Client().send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: HOUSEHOLDS_PREFIX,
+        ContinuationToken: continuationToken,
+      }),
+    )
+
+    const contents = Array.isArray(response.Contents) ? response.Contents : []
+    contents.forEach((entry) => {
+      const key = entry?.Key
+      if (typeof key === 'string' && key.endsWith('.json')) {
+        keys.push(key)
+        if (entry.LastModified && (!newestLastModified || entry.LastModified > newestLastModified)) {
+          newestLastModified = entry.LastModified
+        }
+      }
+    })
+
+    if (!response.IsTruncated) break
+    continuationToken = response.NextContinuationToken
+  }
+
+  return { keys, newestLastModified }
+}
+
+const mapLimit = async (items, limit, mapper) => {
+  const results = new Array(items.length)
+  let cursor = 0
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+      results[index] = await mapper(items[index], index)
+    }
+  })
+
+  await Promise.all(workers)
+  return results
+}
+
 const handleGet = async () => {
   if (!BUCKET) {
     return bad(500, 'Missing S3 bucket configuration')
   }
   try {
+    const index = await getJsonObject(INDEX_KEY)
+    const householdIds = Array.isArray(index?.householdIds) ? index.householdIds.filter((id) => typeof id === 'string' && id.trim()) : null
+    if (householdIds && householdIds.length > 0) {
+      const entries = await mapLimit(householdIds, 10, async (id) => {
+        try {
+          return await getJsonObject(householdKeyForId(id))
+        } catch (error) {
+          console.error('guest-list household get error', { id, error })
+          return null
+        }
+      })
+      const households = entries.filter((entry) => entry && typeof entry === 'object')
+      return ok({ households, updatedAt: index?.updatedAt || null })
+    }
+
     const response = await getS3Client().send(
       new GetObjectCommand({
         Bucket: BUCKET,
-        Key: KEY,
+        Key: LEGACY_KEY,
       }),
     )
     const text = await streamToString(response.Body)
@@ -67,22 +161,105 @@ const handlePost = async (event) => {
     return bad(400, 'Invalid JSON')
   }
 
-  if (!Array.isArray(payload.households)) {
-    return bad(400, 'households must be an array')
+  const upserts = Array.isArray(payload.upserts) ? payload.upserts : null
+  const deletes = Array.isArray(payload.deletes) ? payload.deletes : null
+  const legacyHouseholds = Array.isArray(payload.households) ? payload.households : null
+
+  if (!upserts && !deletes && !legacyHouseholds) {
+    return bad(400, 'Expected { upserts, deletes } or { households }')
   }
 
-  const body = JSON.stringify({ households: payload.households, updatedAt: new Date().toISOString() })
-
   try {
-    await getS3Client().send(
+    const client = getS3Client()
+
+    if (legacyHouseholds) {
+      const deduped = legacyHouseholds.filter((entry) => entry && typeof entry === 'object' && entry.id)
+      await mapLimit(deduped, 8, async (household) => {
+        await client.send(
+          new PutObjectCommand({
+            Bucket: BUCKET,
+            Key: householdKeyForId(household.id),
+            Body: JSON.stringify(household),
+            ContentType: 'application/json',
+          }),
+        )
+      })
+      const indexBody = JSON.stringify({ householdIds: deduped.map((household) => String(household.id)), updatedAt: new Date().toISOString() })
+      await client.send(
+        new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: INDEX_KEY,
+          Body: indexBody,
+          ContentType: 'application/json',
+        }),
+      )
+      return ok({ saved: true, upserted: deduped.length, deleted: 0, migrated: true })
+    }
+
+    const deleteIds = deletes ? deletes.filter((id) => typeof id === 'string' && id.trim()) : []
+    const upsertHouseholds = upserts ? upserts.filter((entry) => entry && typeof entry === 'object' && entry.id) : []
+
+    let index = await getJsonObject(INDEX_KEY)
+    let householdIds = Array.isArray(index?.householdIds) ? index.householdIds.filter((id) => typeof id === 'string' && id.trim()) : null
+
+    if (!householdIds) {
+      const legacy = await getJsonObject(LEGACY_KEY)
+      const legacyList = Array.isArray(legacy?.households) ? legacy.households.filter((entry) => entry && typeof entry === 'object' && entry.id) : null
+      if (legacyList && legacyList.length > 0) {
+        await mapLimit(legacyList, 8, async (household) => {
+          await client.send(
+            new PutObjectCommand({
+              Bucket: BUCKET,
+              Key: householdKeyForId(household.id),
+              Body: JSON.stringify(household),
+              ContentType: 'application/json',
+            }),
+          )
+        })
+        householdIds = legacyList.map((household) => String(household.id))
+      } else {
+        const { keys } = await listHouseholdObjects()
+        householdIds = keys.map(householdIdFromKey).filter(Boolean)
+      }
+    }
+
+    const householdIdSet = new Set(householdIds || [])
+
+    await mapLimit(upsertHouseholds, 8, async (household) => {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: householdKeyForId(household.id),
+          Body: JSON.stringify(household),
+          ContentType: 'application/json',
+        }),
+      )
+    })
+
+    upsertHouseholds.forEach((household) => householdIdSet.add(String(household.id)))
+
+    await mapLimit(deleteIds, 8, async (id) => {
+      await client.send(
+        new DeleteObjectCommand({
+          Bucket: BUCKET,
+          Key: householdKeyForId(id),
+        }),
+      )
+    })
+    deleteIds.forEach((id) => householdIdSet.delete(String(id)))
+
+    const updatedAt = new Date().toISOString()
+    const indexBody = JSON.stringify({ householdIds: [...householdIdSet], updatedAt })
+    await client.send(
       new PutObjectCommand({
         Bucket: BUCKET,
-        Key: KEY,
-        Body: body,
+        Key: INDEX_KEY,
+        Body: indexBody,
         ContentType: 'application/json',
       }),
     )
-    return ok({ saved: true })
+
+    return ok({ saved: true, upserted: upsertHouseholds.length, deleted: deleteIds.length, updatedAt })
   } catch (error) {
     console.error('guest-list save error', error)
     const status = error?.$metadata?.httpStatusCode || 500

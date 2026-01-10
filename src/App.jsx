@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 const heroImage = '/STDEdit.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
-import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, slugify } from './components/GuestListManager.jsx'
+import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, normalizeSlug, slugify } from './components/GuestListManager.jsx'
 
 const TISCH_START_TIME = '2:30 PM'
 const navLinks = [
@@ -106,9 +106,12 @@ const normalizeTischRsvp = (status, invited) => {
   }
   return 'Awaiting response'
 }
+const getHouseholdSlugKey = (household) =>
+  normalizeSlug(household?.customSlug ?? household?.slug) || slugify(household?.envelopeName || household?.name || 'household')
 const normalizeHousehold = (household) => ({
   ...household,
-  slug: household.slug || slugify(household.envelopeName || 'household'),
+  customSlug: normalizeSlug(household?.customSlug) || '',
+  slug: getHouseholdSlugKey(household),
   tischInvited: Boolean(household.tischInvited),
   plusOneAccepted: Boolean(household.plusOneAccepted),
   rsvpLocked: Boolean(household.rsvpLocked),
@@ -268,9 +271,9 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     setFormError('')
     try {
       const households = loadInitialHouseholds()
-      const slug = householdMatch.slug || slugify(householdMatch.envelopeName)
+      const slugKey = getHouseholdSlugKey(householdMatch)
       const updated = households.map((household) => {
-        if ((household.slug || slugify(household.envelopeName)) !== slug) return household
+        if (getHouseholdSlugKey(household) !== slugKey) return household
         const guests = (household.guests || []).map((guest, index) => ({
           ...guest,
           rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
@@ -294,7 +297,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         }
       })
       window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(updated))
-      const refreshed = updated.find((h) => (h.slug || slugify(h.envelopeName)) === slug)
+      const refreshed = updated.find((household) => getHouseholdSlugKey(household) === slugKey)
       onHouseholdUpdate?.(refreshed)
       setTargetLocked(true)
       setFormStatus('success')
@@ -769,16 +772,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                     })
                   const dietaryValue = targetDietaries[index] || 'None'
                   const tischValue = normalizeTischRsvp(targetTischResponses[index], isTischInvite)
-                  const resetAwaiting = () => {
-                    setTargetResponses((prev) => {
-                      const next = [...prev]
-                      next[index] = 'Awaiting response'
-                      return next
-                    })
-                    if (isTischInvite) {
-                      setTischResponse(index, 'Awaiting response')
-                    }
-                  }
                   const markNotAttending = () => {
                     setTargetResponses((prev) => {
                       const next = [...prev]
@@ -792,13 +785,47 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                   return (
                     <div key={guest.id} className="space-y-3 rounded-2xl border border-sage/20 bg-white/70 p-4 shadow-sm">
                       <p className="text-sm font-semibold text-sage-dark">{guest.name}, are you coming?</p>
+                      {isTischInvite && (
+                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Tisch {TISCH_START_TIME}</span>
+                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">pre-ceremony</span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                            {[
+                              { value: 'Attending', label: 'I’ll be there' },
+                              { value: 'Not attending', label: 'Can’t make it' },
+                            ].map((option) => {
+                              const isActive = tischValue === option.value
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  disabled={targetLocked}
+                                  onClick={() => setTischResponse(index, option.value)}
+                                  className={`rounded-full border px-4 py-2 transition ${
+                                    isActive
+                                      ? 'border-sage bg-sage text-white shadow-sm'
+                                      : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
+                                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                                >
+                                  {option.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <p className="mt-2 text-xs text-charcoal/70">
+                            What’s a tisch? A spirited gathering with songs, toasts, and well wishes before the ceremony.
+                          </p>
+                        </div>
+                      )}
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
-                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">
-                            <span>Ceremony</span>
-                            <span className="text-[0.65rem] text-charcoal/60">Garden chuppah</span>
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Ceremony</span>
+                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">Garden chuppah</span>
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
                             <button
                               type="button"
                               disabled={targetLocked}
@@ -826,11 +853,11 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                           </div>
                         </div>
                         <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
-                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">
-                            <span>Reception</span>
-                            <span className="text-[0.65rem] text-charcoal/60">Dinner + dancing</span>
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Reception</span>
+                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">Dinner + dancing</span>
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-sm">
+                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
                             <button
                               type="button"
                               disabled={targetLocked}
@@ -858,55 +885,12 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                           </div>
                         </div>
                       </div>
-                      {isTischInvite && (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
-                          <div className="flex items-center justify-between text-[0.7rem] uppercase tracking-[0.25em] text-amber-900/90">
-                            <span>Tisch {TISCH_START_TIME}</span>
-                            <span className="text-[0.65rem] text-amber-900/80">pre-ceremony</span>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {[
-                              { value: 'Attending', label: 'I’ll be there' },
-                              { value: 'Awaiting response', label: 'Not sure yet' },
-                              { value: 'Not attending', label: 'Can’t make it' },
-                            ].map((option) => {
-                              const isActive = tischValue === option.value
-                              return (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  disabled={targetLocked}
-                                  onClick={() => setTischResponse(index, option.value)}
-                                  className={`rounded-full border px-4 py-2 transition ${
-                                    isActive
-                                      ? 'border-amber-500 bg-amber-500 text-white shadow-sm'
-                                      : 'border-amber-200 bg-white text-amber-900 hover:border-amber-400 hover:bg-amber-100'
-                                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                                >
-                                  {option.label}
-                                </button>
-                              )
-                            })}
-                          </div>
-                          <p className="mt-2 text-xs text-amber-900/80">
-                            What’s a tisch? A spirited gathering with songs, toasts, and well wishes before the ceremony.
-                          </p>
-                        </div>
-                      )}
-                      <div className="flex flex-wrap gap-2 text-xs uppercase tracking-[0.3em]">
-                        <button
-                          type="button"
-                          disabled={targetLocked}
-                          onClick={resetAwaiting}
-                          className="rounded-full border border-sage/40 px-3 py-2 font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Not sure yet
-                        </button>
+                      <div className="flex flex-wrap gap-2 text-sm">
                         <button
                           type="button"
                           disabled={targetLocked}
                           onClick={markNotAttending}
-                          className="rounded-full border border-rose-200 px-3 py-2 font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Can’t attend either
                         </button>
@@ -1136,10 +1120,11 @@ function App() {
         setCurrentSlug(null)
         return
       }
-      const slug = decodeURIComponent(path.replace(/^\//, ''))
-      setCurrentSlug(slug)
+      const slug = decodeURIComponent(path.replace(/^\/+|\/+$/g, ''))
+      const slugKey = normalizeSlug(slug)
+      setCurrentSlug(slugKey)
       const households = householdCache || loadInitialHouseholds()
-      const match = households.find((household) => (household.slug || slugify(household.envelopeName)) === slug)
+      const match = households.find((household) => getHouseholdSlugKey(household) === slugKey)
       setSlugHousehold(match || null)
     }
     handleRouteChange()
@@ -1149,7 +1134,7 @@ function App() {
 
   useEffect(() => {
     if (!currentSlug || !householdCache) return
-    const match = householdCache.find((household) => (household.slug || slugify(household.envelopeName)) === currentSlug)
+    const match = householdCache.find((household) => getHouseholdSlugKey(household) === currentSlug)
     setSlugHousehold(match || null)
   }, [currentSlug, householdCache])
 

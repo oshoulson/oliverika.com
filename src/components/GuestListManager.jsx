@@ -10,12 +10,19 @@ const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
 const FUNCTIONS_BASE = '/.netlify/functions'
 
 export const slugify = (text) => {
-  const cleaned = (text || '')
+  const cleaned = normalizeSlug(text)
+  return cleaned || `invite_${Math.random().toString(16).slice(2)}`
+}
+
+export const normalizeSlug = (value) => {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const withoutDiacritics = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return withoutDiacritics
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .replace(/_+/g, '_')
-  return cleaned || `invite_${Math.random().toString(16).slice(2)}`
 }
 
 const createId = (prefix) => {
@@ -184,6 +191,7 @@ const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Fre
 const invitedByOptions = ['Bride', 'Groom', 'Both']
 const tischRsvpOptions = ['Awaiting response', 'Attending', 'Not attending', 'Not invited']
 const toggleableColumnLabels = {
+  customSlug: 'Custom URL',
   invitedBy: 'Invited by',
   invitationSent: 'Invite sent',
   saveTheDateSent: 'Save the date',
@@ -222,6 +230,7 @@ const animationStyles = `
 
 const createDefaultFilters = () => ({
   envelopeName: '',
+  customSlug: '',
   invitedBy: 'all',
   invitationSent: 'any',
   saveTheDateSent: 'any',
@@ -361,6 +370,7 @@ const formatAddress = (address = {}) => {
 const blankHousehold = () => ({
   id: createId('household'),
   envelopeName: 'New household',
+  customSlug: '',
   slug: slugify('New household'),
   invitedBy: 'Both',
   address: { line1: '', city: '', state: '', postalCode: '', country: '' },
@@ -425,7 +435,20 @@ const normalizeTischRsvp = (status, invited) => {
 
 const ensureDerivedFields = (household) => ({
   ...household,
-  slug: household.slug || slugify(household.envelopeName || 'household'),
+  customSlug: (() => {
+    const derived = slugify(household.envelopeName || 'household')
+    const incoming = normalizeSlug(household.customSlug)
+    if (incoming) return incoming
+    const legacy = normalizeSlug(household.slug)
+    return legacy && legacy !== derived ? legacy : ''
+  })(),
+  slug: (() => {
+    const derived = slugify(household.envelopeName || 'household')
+    const custom = normalizeSlug(household.customSlug)
+    if (custom) return custom
+    const legacy = normalizeSlug(household.slug)
+    return legacy && legacy !== derived ? legacy : derived
+  })(),
   tischInvited: Boolean(household.tischInvited),
   plusOneAccepted: Boolean(household.plusOneAccepted),
   rsvpLocked: Boolean(household.rsvpLocked),
@@ -478,6 +501,8 @@ export default function GuestListManager() {
   const saveTimer = useRef(null)
   const viewPrefsTimer = useRef(null)
   const isSavingRef = useRef(false)
+  const dirtyUpsertsRef = useRef(new Set())
+  const dirtyDeletesRef = useRef(new Set())
   const exportMenuRef = useRef(null)
   const columnsMenuRef = useRef(null)
 
@@ -608,7 +633,12 @@ export default function GuestListManager() {
 
   const persistGuestList = async () => {
     if (isSavingRef.current) return
+    const upsertIds = [...dirtyUpsertsRef.current]
+    const deleteIds = [...dirtyDeletesRef.current]
+    if (upsertIds.length === 0 && deleteIds.length === 0) return
+
     const latestHouseholds = householdsRef.current
+    const upserts = latestHouseholds.filter((household) => upsertIds.includes(household.id))
     isSavingRef.current = true
     setRemoteStatus((status) => (status === 'loading' ? 'loading' : 'saving'))
     setRemoteError('')
@@ -616,11 +646,13 @@ export default function GuestListManager() {
       const response = await fetch(`${FUNCTIONS_BASE}/guest-list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ households: latestHouseholds }),
+        body: JSON.stringify({ upserts, deletes: deleteIds }),
       })
       if (!response.ok) {
         throw new Error('Save failed')
       }
+      upsertIds.forEach((id) => dirtyUpsertsRef.current.delete(id))
+      deleteIds.forEach((id) => dirtyDeletesRef.current.delete(id))
       setRemoteStatus('saved')
     } catch (error) {
       console.error('save guest list error', error)
@@ -636,6 +668,18 @@ export default function GuestListManager() {
       clearTimeout(saveTimer.current)
     }
     saveTimer.current = setTimeout(persistGuestList, 600)
+  }
+
+  const markHouseholdUpsert = (householdId) => {
+    dirtyDeletesRef.current.delete(householdId)
+    dirtyUpsertsRef.current.add(householdId)
+    queuePersist()
+  }
+
+  const markHouseholdDelete = (householdId) => {
+    dirtyUpsertsRef.current.delete(householdId)
+    dirtyDeletesRef.current.add(householdId)
+    queuePersist()
   }
 
   const stats = useMemo(() => {
@@ -750,10 +794,20 @@ export default function GuestListManager() {
       prev.map((household) => {
         if (household.id !== id) return household
         const next = { ...household, ...updates }
+        if (typeof updates.customSlug === 'string') {
+          const normalizedCustom = normalizeSlug(updates.customSlug)
+          next.customSlug = normalizedCustom
+          next.slug = normalizedCustom || slugify(next.envelopeName || 'household')
+        }
         if (typeof updates.envelopeName === 'string') {
-          const oldSlug = household.slug || slugify(household.envelopeName || '')
-          if (!household.slug || oldSlug === household.slug || household.slug.startsWith('new_household')) {
-            next.slug = slugify(updates.envelopeName)
+          const hasCustom = Boolean(normalizeSlug(next.customSlug))
+          if (!hasCustom) {
+            const derivedOld = slugify(household.envelopeName || '')
+            const normalizedOld = normalizeSlug(household.slug)
+            const wasDerived = !normalizedOld || normalizedOld === derivedOld || normalizedOld.startsWith('new_household')
+            if (wasDerived) {
+              next.slug = slugify(updates.envelopeName)
+            }
           }
         }
         if (typeof updates.tischInvited !== 'undefined') {
@@ -767,7 +821,7 @@ export default function GuestListManager() {
         return next
       }),
     )
-    queuePersist()
+    markHouseholdUpsert(id)
   }
 
   const updateAddressField = (id, field, value) => {
@@ -776,7 +830,7 @@ export default function GuestListManager() {
         household.id === id ? { ...household, address: { ...household.address, [field]: value } } : household,
       ),
     )
-    queuePersist()
+    markHouseholdUpsert(id)
   }
 
   const updateGuest = (householdId, guestId, updates) => {
@@ -797,7 +851,7 @@ export default function GuestListManager() {
         return { ...household, guests }
       }),
     )
-    queuePersist()
+    markHouseholdUpsert(householdId)
   }
 
   const addGuest = (householdId, type = 'primary') => {
@@ -818,7 +872,7 @@ export default function GuestListManager() {
       }),
     )
     setOpenMenuId(null)
-    queuePersist()
+    markHouseholdUpsert(householdId)
   }
 
   const removeHousehold = (householdId) => {
@@ -831,7 +885,7 @@ export default function GuestListManager() {
     if (openMenuId === householdId) {
       setOpenMenuId(null)
     }
-    queuePersist()
+    markHouseholdDelete(householdId)
   }
 
   const removeGuest = (householdId, guestId) => {
@@ -842,7 +896,7 @@ export default function GuestListManager() {
         return { ...household, guests: remaining.length > 0 ? remaining : household.guests }
       }),
     )
-    queuePersist()
+    markHouseholdUpsert(householdId)
   }
 
   const toggleHouseholdExpanded = (householdId) => {
@@ -871,6 +925,7 @@ export default function GuestListManager() {
       filterValue === 'any' ? true : filterValue === 'yes' ? Boolean(value) : !value
     const filtered = households.filter((household) => {
       if (filters.envelopeName && !textIncludes(household.envelopeName, filters.envelopeName)) return false
+      if (filters.customSlug && !textIncludes(household.customSlug || household.slug, filters.customSlug)) return false
       if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
       if (!boolMatches(household.invitationSent, filters.invitationSent)) return false
       if (!boolMatches(household.saveTheDateSent, filters.saveTheDateSent)) return false
@@ -1135,7 +1190,7 @@ export default function GuestListManager() {
       return next
     })
     setOpenMenuId(null)
-    queuePersist()
+    markHouseholdUpsert(nextHousehold.id)
   }
 
   const startNewHouseholdDraft = () => {
@@ -1495,7 +1550,7 @@ export default function GuestListManager() {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[2050px] divide-y divide-sage/20 text-sm">
+          <table className="min-w-[2270px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
                 <th className="sticky left-0 z-40 px-3 py-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.08)]">
@@ -1504,6 +1559,14 @@ export default function GuestListManager() {
                     {renderSortIcon('envelopeName')}
                   </button>
                 </th>
+                {isColumnVisible('customSlug') && (
+                  <th className="px-3 py-2 w-[220px]">
+                    <button type="button" onClick={() => toggleSort('customSlug')} className="group flex items-center gap-2">
+                      <span>Custom URL</span>
+                      {renderSortIcon('customSlug')}
+                    </button>
+                  </th>
+                )}
                 {isColumnVisible('invitedBy') && (
                   <th className="px-3 py-2 w-[150px]">
                     <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
@@ -1614,6 +1677,17 @@ export default function GuestListManager() {
                     placeholder="Search household"
                   />
                 </th>
+                {isColumnVisible('customSlug') && (
+                  <th className="px-3 pb-2 w-[220px]">
+                    <input
+                      type="text"
+                      value={filters.customSlug}
+                      onChange={(event) => handleFilterChange('customSlug', event.target.value)}
+                      className={filterInputClass}
+                      placeholder="Slug search"
+                    />
+                  </th>
+                )}
                 {isColumnVisible('invitedBy') && (
                   <th className="px-3 pb-2 w-[150px]">
                     <select
@@ -1822,6 +1896,20 @@ export default function GuestListManager() {
                           </div>
                         </div>
                       </td>
+                      {isColumnVisible('customSlug') && (
+                        <td className="px-3 py-2 w-[220px]">
+                          <input
+                            type="text"
+                            value={household.customSlug || ''}
+                            onChange={(event) => updateHousehold(household.id, { customSlug: event.target.value })}
+                            className={tableInputClass}
+                            placeholder="Optional"
+                          />
+                          <p className="mt-1 truncate text-[0.7rem] font-semibold text-sage-dark/60" title={`/${household.slug}`}>
+                            /{household.slug}
+                          </p>
+                        </td>
+                      )}
                       {isColumnVisible('invitedBy') && (
                         <td className="px-3 py-2 w-[150px]">
                           <select
@@ -2045,6 +2133,7 @@ export default function GuestListManager() {
                               placeholder="Guest name"
                             />
                           </td>
+                          {isColumnVisible('customSlug') && <td className="px-3 py-2 w-[220px] text-sm text-charcoal/60">—</td>}
                           {isColumnVisible('invitedBy') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
                           {isColumnVisible('invitationSent') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
                           {isColumnVisible('saveTheDateSent') && <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>}
@@ -2293,6 +2382,19 @@ export default function GuestListManager() {
                       placeholder="Household or envelope name"
                       required
                     />
+                  </label>
+                  <label className="block text-xs font-semibold text-sage-dark/80">
+                    Custom URL (optional)
+                    <input
+                      type="text"
+                      value={draftHousehold.customSlug || ''}
+                      onChange={(event) => updateDraftField('customSlug', event.target.value)}
+                      className={`${inputClass} mt-2`}
+                      placeholder="Optional"
+                    />
+                    <p className="mt-1 truncate text-[0.7rem] font-semibold text-sage-dark/60" title={`/${normalizeSlug(draftHousehold.customSlug) || slugify(draftHousehold.envelopeName || 'household')}`}>
+                      /{normalizeSlug(draftHousehold.customSlug) || slugify(draftHousehold.envelopeName || 'household')}
+                    </p>
                   </label>
                   <label className="block text-xs font-semibold text-sage-dark/80">
                     Invited by
