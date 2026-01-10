@@ -9,11 +9,6 @@ const VIEW_PREFS_KEY = 'oliverikaGuestListViewPrefs'
 const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
 const FUNCTIONS_BASE = '/.netlify/functions'
 
-export const slugify = (text) => {
-  const cleaned = normalizeSlug(text)
-  return cleaned || `invite_${Math.random().toString(16).slice(2)}`
-}
-
 export const normalizeSlug = (value) => {
   const text = String(value ?? '').trim()
   if (!text) return ''
@@ -23,6 +18,11 @@ export const normalizeSlug = (value) => {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .replace(/_+/g, '_')
+}
+
+export const slugify = (text) => {
+  const cleaned = normalizeSlug(text)
+  return cleaned || `invite_${Math.random().toString(16).slice(2)}`
 }
 
 const createId = (prefix) => {
