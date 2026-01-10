@@ -16,12 +16,12 @@ export const normalizeSlug = (value) => {
   return withoutDiacritics
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
+    .replace(/^_+/g, '')
     .replace(/_+/g, '_')
 }
 
 export const slugify = (text) => {
-  const cleaned = normalizeSlug(text)
+  const cleaned = normalizeSlug(text).replace(/_+$/g, '')
   return cleaned || `invite_${Math.random().toString(16).slice(2)}`
 }
 
