@@ -28,9 +28,19 @@ const tischDetails = [
 ]
 
 const travelNotes = [
-  { title: 'Stay Nearby', text: 'We reserved blocks at Hotel Commonwealth (Boston) and The Wellesley Inn. Mention “Oliver & Erika” for preferred rates through April 15.' },
+  { title: 'Stay Nearby', text: 'We reserved blocks at three hotels: Hotel Commonwealth (Boston), The Wellesley Inn, and Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, 10 minutes from the venue). All blocks offer preferred rates. Book the Natick block by September 9 for Friday–Monday, October 9–12.' },
   { title: 'Getting There', text: 'The venue is a 30-minute ride from downtown Boston. Rideshare drop-off is at the Cheney Gate entrance; limited parking is available on site.' },
   { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
+]
+
+const dressCodePalette = [
+  'rgb(189 155 170)',
+  'rgb(110, 48, 10)',
+  'rgb(66 28 25)',
+  'rgb(183 145 142)',
+  'rgb(29 43 30)',
+  'rgb(168 189 170)',
+  'rgb(199, 152, 79)',
 ]
 
 const baseAgendaItems = [
@@ -123,40 +133,7 @@ const normalizeHousehold = (household) => ({
   })),
 })
 
-const useIsDesktop = () => {
-  const getMatch = () => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return false
-    }
-    return window.matchMedia('(min-width: 768px)').matches
-  }
-  const [isDesktop, setIsDesktop] = useState(getMatch)
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return () => {}
-    }
-    const mediaQuery = window.matchMedia('(min-width: 768px)')
-    const handler = (event) => setIsDesktop(event.matches)
-    mediaQuery.addEventListener('change', handler)
-    setIsDesktop(mediaQuery.matches)
-    return () => mediaQuery.removeEventListener('change', handler)
-  }, [])
-
-  return isDesktop
-}
-
-const createInitialFormState = () => ({
-  fullName: '',
-  email: '',
-  attendance: 'yes',
-  bringingGuest: 'no',
-  guestName: '',
-  notes: '',
-})
-
 function WeddingSite({ householdMatch, onHouseholdUpdate }) {
-  const [formData, setFormData] = useState(createInitialFormState)
   const [formStatus, setFormStatus] = useState('idle')
   const [formError, setFormError] = useState('')
   const [hasSubmitted, setHasSubmitted] = useState(false)
@@ -177,26 +154,14 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [targetEmail, setTargetEmail] = useState('')
   const hiddenFileInput = useRef(null)
   const doodleBoardRef = useRef(null)
-  const isDesktop = useIsDesktop()
+  const [lookupQuery, setLookupQuery] = useState('')
+  const [lookupError, setLookupError] = useState('')
 
-  const isAttending = formData.attendance === 'yes'
-  const bringingGuest = formData.bringingGuest === 'yes' && isAttending
   const submissionLocked = hasSubmitted
   const isSlugRsvp = Boolean(householdMatch)
   const isTischInvite = Boolean(householdMatch?.tischInvited)
   const heroDetails = isTischInvite ? tischDetails : defaultDetails
   const agendaItems = isTischInvite ? [tischAgendaItem, ...baseAgendaItems] : baseAgendaItems
-
-  const updateField = (field) => (event) => {
-    setFormData((prev) => ({ ...prev, [field]: event.target.value }))
-  }
-
-  const toggleChoice = (field, value) => () => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: prev[field] === value ? '' : value,
-    }))
-  }
 
   const eventSelectionsFromStatus = (status) => {
     const normalized = normalizeRsvpStatus(status)
@@ -235,14 +200,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     })
   }
 
-  const rememberSubmissionFlag = () => {
-    try {
-      window.localStorage.setItem(RSVP_STORAGE_KEY, 'true')
-    } catch (error) {
-      console.warn('Unable to persist RSVP submission flag', error)
-    }
-  }
-
   const clearSubmissionFlag = () => {
     try {
       window.localStorage.removeItem(RSVP_STORAGE_KEY)
@@ -262,6 +219,37 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     setSubmissionAction('created')
     setFormStatus('idle')
     setFormError('')
+  }
+
+  const handleLookup = (event) => {
+    event.preventDefault()
+    const query = lookupQuery.trim()
+    if (!query) return
+    setLookupError('')
+    const households = loadInitialHouseholds().map(normalizeHousehold)
+    const queryKey = normalizeSlug(query)
+    if (!queryKey) return
+    // Try matching as a slug
+    let match = households.find((h) => getHouseholdSlugKey(h) === queryKey)
+    // Try matching against individual guest names
+    if (!match) {
+      match = households.find((h) =>
+        (h.guests || []).some((g) => normalizeSlug(g.name) === queryKey),
+      )
+    }
+    // Try matching against envelope name
+    if (!match) {
+      match = households.find((h) => normalizeSlug(h.envelopeName) === queryKey)
+    }
+    if (match) {
+      const slug = getHouseholdSlugKey(match)
+      window.history.pushState({}, '', '/' + encodeURIComponent(slug))
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    } else {
+      setLookupError(
+        "We couldn't find a match. Please double-check the link from your invitation or try your full name as it appears on the envelope.",
+      )
+    }
   }
 
   const handleHouseholdSubmit = (event) => {
@@ -307,64 +295,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       console.error('household rsvp save error', error)
       setFormStatus('error')
       setFormError('Unable to save RSVP right now. Please try again.')
-    }
-  }
-
-  const handleSubmit = async (event) => {
-    if (householdMatch) {
-      return handleHouseholdSubmit(event)
-    }
-    event.preventDefault()
-    if (formStatus === 'submitting') return
-    if (hasSubmitted) {
-      setFormError('We already have your RSVP. Click "Update RSVP" if you need to make a change.')
-      return
-    }
-
-    setFormStatus('submitting')
-    setFormError('')
-
-    const includesGuest = formData.attendance === 'yes' && formData.bringingGuest === 'yes'
-    const doodleDataUrl = hasDoodle ? doodleBoardRef.current?.toDataUrl?.() || '' : ''
-    const payload = {
-      fullName: formData.fullName.trim(),
-      email: formData.email.trim(),
-      attendance: formData.attendance,
-      bringingGuest: formData.bringingGuest,
-      guestName: includesGuest ? formData.guestName.trim() : '',
-      notes: formData.notes.trim(),
-      doodleDataUrl,
-    }
-
-    try {
-      const response = await fetch(`${FUNCTIONS_BASE}/submit-rsvp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      let parsedBody = null
-      try {
-        parsedBody = await response.json()
-      } catch (parseError) {
-        console.warn('Unable to parse RSVP response body', parseError)
-      }
-
-      if (!response.ok) {
-        const message = parsedBody?.error || 'Unable to send your RSVP right now. Please try again.'
-        throw new Error(message)
-      }
-
-      setSubmissionAction(parsedBody?.action === 'updated' ? 'updated' : 'created')
-      rememberSubmissionFlag()
-      setHasSubmitted(true)
-      setFormStatus('success')
-      setFormData(createInitialFormState())
-      doodleBoardRef.current?.clear?.()
-    } catch (error) {
-      console.error('submit rsvp error', error)
-      setFormStatus('error')
-      setFormError(error.message || 'Unable to send your RSVP right now. Please try again or email us.')
     }
   }
 
@@ -620,6 +550,22 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 <div key={note.title}>
                   <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">{note.title}</p>
                   <p className="mt-2 text-sm leading-relaxed text-charcoal/80">{note.text}</p>
+                  {note.title === 'Dress Code' && (
+                    <div className="mt-4">
+                      <p className="text-[0.7rem] uppercase tracking-[0.35em] text-sage-dark/60">Palette (just for inspiration!)</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {dressCodePalette.map((color, index) => (
+                          <span
+                            key={color}
+                            role="img"
+                            aria-label={`Suggested dress code color ${index + 1}`}
+                            className="h-10 w-10 rounded-full shadow-sm ring-1 ring-black/10"
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -957,134 +903,44 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 </div>
               </form>
             ) : (
-              <form onSubmit={handleSubmit} className="space-y-6" aria-disabled={submissionLocked}>
-                <div>
-                  <label htmlFor="fullName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                    Full Name
-                  </label>
-                  <input
-                    id="fullName"
-                    type="text"
-                    required
-                    value={formData.fullName}
-                    onChange={updateField('fullName')}
-                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                    placeholder="First & Last Name"
-                  />
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
+                  <p className="font-semibold text-sage-dark">Find your invitation</p>
+                  <p className="mt-1 text-charcoal/70">
+                    Enter the unique link from your invitation (just the part after oliverika.com/) or the full name of someone in your household.
+                  </p>
                 </div>
-
-                <div>
-                  <label htmlFor="email" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                    Email
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    required
-                    value={formData.email}
-                    onChange={updateField('email')}
-                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                    placeholder="you@email.com"
-                  />
-                </div>
-
-                <fieldset className="space-y-3">
-                  <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Will you attend?</legend>
-                  <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Attendance">
-                    {['yes', 'no'].map((value) => {
-                      const selected = formData.attendance === value
-                      return (
-                        <button
-                          type="button"
-                          key={value}
-                          onClick={toggleChoice('attendance', value)}
-                          role="radio"
-                          aria-checked={selected}
-                          className={`flex items-center gap-2 rounded-full border px-4 py-2 transition ${
-                            selected ? 'border-sage bg-sage/15 text-sage-dark shadow-sm' : 'border-sage/30 hover:border-sage/60'
-                          }`}
-                        >
-                          <span className={`inline-block h-3 w-3 rounded-full border ${selected ? 'border-sage bg-sage' : 'border-sage/40'}`} />
-                          {value === 'yes' ? 'Obviously' : '😢😢😢😢 Neither'}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </fieldset>
-
-                {isAttending && (
-                  <fieldset className="space-y-3">
-                    <legend className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Bringing a plus one?</legend>
-                    <div className="flex gap-4 text-sm" role="radiogroup" aria-label="Plus one">
-                      {['no', 'yes'].map((value) => {
-                        const selected = formData.bringingGuest === value
-                        return (
-                          <button
-                            type="button"
-                            key={value}
-                            onClick={toggleChoice('bringingGuest', value)}
-                            role="radio"
-                            aria-checked={selected}
-                            className={`flex items-center gap-2 rounded-full border px-4 py-2 transition ${
-                              selected ? 'border-sage bg-sage/15 text-sage-dark shadow-sm' : 'border-sage/30 hover:border-sage/60'
-                            }`}
-                          >
-                            <span className={`inline-block h-3 w-3 rounded-full border ${selected ? 'border-sage bg-sage' : 'border-sage/40'}`} />
-                            {value === 'yes' ? 'Yes, noted on invite' : 'No, just me'}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </fieldset>
-                )}
-
-                {bringingGuest && (
+                <form onSubmit={handleLookup} className="space-y-4">
                   <div>
-                    <label htmlFor="guestName" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                      Guest Name
+                    <label htmlFor="lookupQuery" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
+                      Invitation link or name
                     </label>
                     <input
-                      id="guestName"
+                      id="lookupQuery"
                       type="text"
                       required
-                      value={formData.guestName}
-                      onChange={updateField('guestName')}
+                      value={lookupQuery}
+                      onChange={(event) => {
+                        setLookupQuery(event.target.value)
+                        setLookupError('')
+                      }}
                       className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                      placeholder="Plus-one full name"
+                      placeholder="e.g. shoulson_family or Oliver Shoulson"
                     />
                   </div>
-                )}
-
-                <div>
-                  <label htmlFor="notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                    Notes / Requests
-                  </label>
-                  <textarea
-                    id="notes"
-                    rows={3}
-                    value={formData.notes}
-                    onChange={updateField('notes')}
-                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                  />
-                </div>
-
-                {!isDesktop && renderDoodleArea('pt-2', '')}
-
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="submit"
-                    disabled={submissionLocked || formStatus === 'submitting'}
-                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
-                  >
-                    {formStatus === 'submitting' ? 'Sending…' : 'Submit RSVP'}
-                  </button>
-                  {formStatus === 'error' && formError && (
+                  {lookupError && (
                     <p className="text-sm text-amber-700" role="alert">
-                      {formError}
+                      {lookupError}
                     </p>
                   )}
-                </div>
-              </form>
+                  <button
+                    type="submit"
+                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark"
+                  >
+                    Find my RSVP
+                  </button>
+                </form>
+              </div>
             )}
           </div>
             <div className="space-y-4">
