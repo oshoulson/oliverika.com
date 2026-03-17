@@ -28,14 +28,14 @@ const tischDetails = [
 ]
 
 const travelNotes = [
-  { title: 'Stay Nearby', text: 'We reserved blocks at three hotels: Hotel Commonwealth (Boston), The Wellesley Inn, and Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, 10 minutes from the venue). All blocks offer preferred rates. Book the Natick block by September 9 for Friday–Monday, October 9–12.' },
+  { title: 'Stay Nearby', text: 'We reserved blocks at the Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, 10 minutes from the venue). All blocks offer preferred rates. Book the Natick block by September 9 for Friday–Monday, October 9–12.' },
   { title: 'Getting There', text: 'The venue is a 30-minute ride from downtown Boston. Rideshare drop-off is at the Cheney Gate entrance; limited parking is available on site.' },
   { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
 ]
 
 const dressCodePalette = [
-  'rgb(189 155 170)',
   'rgb(110, 48, 10)',
+  'rgb(189 155 170)',
   'rgb(66 28 25)',
   'rgb(183 145 142)',
   'rgb(29 43 30)',
