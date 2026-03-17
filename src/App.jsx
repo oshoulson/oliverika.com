@@ -15,7 +15,7 @@ const navLinks = [
 const defaultDetails = [
   { label: 'Date', value: 'October 11, 2026' },
   { label: 'Arrival', value: 'Guests at 4:30 PM' },
-  { label: 'Venue', value: 'The Gardens at Elm Bank' },
+  { label: 'Venue', value: 'The Garden at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
 ]
 
@@ -543,7 +543,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         <div className="grid gap-10 md:grid-cols-2">
           <div>
             <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Travel &amp; Accommodations</p>
-            <h2 className="mt-4 font-serif text-4xl text-sage-dark">The Gardens at Elm Bank</h2>
+            <h2 className="mt-4 font-serif text-4xl text-sage-dark">The Garden at Elm Bank</h2>
             <p className="mt-2 text-sm text-charcoal/80">900 Washington St, Wellesley, MA 02482</p>
             <div className="mt-8 space-y-6">
               {travelNotes.map((note) => (
@@ -573,7 +573,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
 
           <div className="overflow-hidden rounded-2xl shadow-lg ring-1 ring-black/10">
             <iframe
-              title="Map showing The Gardens at Elm Bank"
+              title="Map showing The Garden at Elm Bank"
               src="https://www.google.com/maps?q=The+Gardens+at+Elm+Bank,900+Washington+St,+Wellesley,+MA+02482&output=embed"
               className="h-full min-h-[320px] w-full"
               loading="lazy"
