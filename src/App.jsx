@@ -950,7 +950,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                         setLookupError('')
                       }}
                       className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                      placeholder="e.g. Oliver Shoulson or Jane Smith"
+                      placeholder="e.g. Erika Anclade or Oliver Shoulson"
                     />
                   </div>
                   {lookupError && (
