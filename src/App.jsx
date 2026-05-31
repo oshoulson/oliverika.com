@@ -14,9 +14,10 @@ const navLinks = [
 
 const defaultDetails = [
   { label: 'Date', value: 'October 11, 2026' },
-  { label: 'Arrival', value: 'Guests at 4:30 PM' },
+  { label: 'Arrival', value: 'Guests at 4:00 PM' },
   { label: 'Venue', value: 'The Garden at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
+  { label: 'RSVP by', value: 'July 15, 2026' },
 ]
 
 const tischDetails = [
@@ -25,11 +26,17 @@ const tischDetails = [
   { label: 'Ceremony', value: 'Chuppah at 4:30 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
+  { label: 'RSVP by', value: 'July 15, 2026' },
 ]
 
 const travelNotes = [
-  { title: 'Stay Nearby', text: 'We reserved blocks at the Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, 10 minutes from the venue). All blocks offer preferred rates. Book the Natick block by September 9 for Friday–Monday, October 9–12.' },
-  { title: 'Getting There', text: 'The venue is a 30-minute ride from downtown Boston. Rideshare drop-off is at the Cheney Gate entrance; limited parking is available on site.' },
+  {
+    title: 'Stay Nearby',
+    text: 'We reserved a block at the Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, about 15–20 minutes from the venue). Book by September 9 for Friday–Monday, October 9–12.',
+    link: 'https://app.marriott.com/reslink?id=1770067768707&key=GRP&app=resvlink',
+    linkText: 'Book your room',
+  },
+  { title: 'Getting There', text: 'The hotel is about a 15–20 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
   { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
 ]
 
@@ -46,21 +53,21 @@ const dressCodePalette = [
 const baseAgendaItems = [
   {
     key: 'arrival',
-    time: '4:30 PM',
-    title: 'Arrivals + garden hello',
+    time: '4:00 PM',
+    title: 'Guest Arrival',
     description: 'Stroll the grounds, say hi to family, and find your seat before we head to the chuppah.',
   },
   {
     key: 'ceremony',
-    time: 'Shortly after arrivals',
+    time: '4:30 PM',
     title: 'Ceremony',
     description: 'We will gather under the chuppah outdoors (with an indoor backup if New England weather insists).',
   },
   {
     key: 'reception',
-    time: 'Evening',
-    title: 'Reception',
-    description: 'Cocktail hour, dinner, and dancing inside the carriage house to celebrate together.',
+    time: '6:20 PM',
+    title: 'Cocktail Hour into Reception',
+    description: 'Cocktail hour flows into dinner and dancing inside the carriage house. Event ends at 10:30 PM.',
   },
 ]
 
@@ -247,7 +254,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       window.dispatchEvent(new PopStateEvent('popstate'))
     } else {
       setLookupError(
-        "We couldn't find a match. Please double-check the link from your invitation or try your full name as it appears on the envelope.",
+        "We couldn't find a match. Try your full name as it appears on your invitation envelope, or the name of another person in your household.",
       )
     }
   }
@@ -461,7 +468,15 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   )
 
   return (
-    <main className="min-h-screen bg-mist px-4 py-12 sm:px-8">
+    <>
+      {!hasSubmitted && (
+        <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
+          <span className="font-semibold">RSVP by July 15</span>
+          {' — '}
+          <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
+        </div>
+      )}
+      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-20' : ''}`}>
       <section className="relative mx-auto flex min-h-[520px] max-w-5xl flex-col overflow-hidden rounded-2xl bg-bone shadow-frame md:min-h-[600px] md:flex-row" id="home">
         <div className="flex flex-col justify-between bg-sage px-6 py-10 text-bone md:w-1/2 md:px-8 lg:px-10">
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 md:flex-nowrap md:gap-6 md:text-[0.65rem] md:tracking-[0.5em]">
@@ -550,6 +565,16 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 <div key={note.title}>
                   <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">{note.title}</p>
                   <p className="mt-2 text-sm leading-relaxed text-charcoal/80">{note.text}</p>
+                  {note.link && (
+                    <a
+                      href={note.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 inline-flex items-center gap-2 rounded-full border border-sage/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-sage-dark transition hover:border-sage hover:bg-sage/10"
+                    >
+                      {note.linkText || 'Learn more'}
+                    </a>
+                  )}
                   {note.title === 'Dress Code' && (
                     <div className="mt-4">
                       <p className="text-[0.7rem] uppercase tracking-[0.35em] text-sage-dark/60">Palette (just for inspiration!)</p>
@@ -644,9 +669,9 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           <div className="space-y-4">
             <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
             <h2 className="font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
-            <p className="text-sm text-charcoal/80">We kindly request a response by April 30 so we can finalize guest counts.</p>
+            <p className="text-sm text-charcoal/80">We kindly request a response by <strong>July 15</strong> so we can finalize guest counts.</p>
             <ul className="space-y-3 text-sm text-charcoal/75">
-              <li>• Include the name that appears on your invitation.</li>
+              <li>• Search your name or the name of anyone in your household to find your form.</li>
               <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
               <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
             </ul>
@@ -905,15 +930,15 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             ) : (
               <div className="space-y-6">
                 <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
-                  <p className="font-semibold text-sage-dark">Find your invitation</p>
+                  <p className="font-semibold text-sage-dark">Find your RSVP</p>
                   <p className="mt-1 text-charcoal/70">
-                    Enter the unique link from your invitation (just the part after oliverika.com/) or the full name of someone in your household.
+                    Search your name or the name of anyone in your household to find your custom RSVP form.
                   </p>
                 </div>
                 <form onSubmit={handleLookup} className="space-y-4">
                   <div>
                     <label htmlFor="lookupQuery" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                      Invitation link or name
+                      Your name
                     </label>
                     <input
                       id="lookupQuery"
@@ -925,7 +950,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                         setLookupError('')
                       }}
                       className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                      placeholder="e.g. shoulson_family or Oliver Shoulson"
+                      placeholder="e.g. Oliver Shoulson or Jane Smith"
                     />
                   </div>
                   {lookupError && (
@@ -954,7 +979,24 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           <p>{submissionAction === 'updated' ? 'We updated your RSVP. Thank you!' : "Thanks! We'll be in touch with next steps."}</p>
         </div>
       )}
-    </main>
+
+      <section id="registry" className="mx-auto mt-16 max-w-5xl rounded-2xl border border-white/50 bg-white/70 p-10 text-charcoal shadow-frame backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Registry</p>
+        <h2 className="mt-4 font-serif text-4xl text-sage-dark">Gifts &amp; Registry</h2>
+        <p className="mt-3 max-w-xl text-sm text-charcoal/80">
+          Your presence is truly the greatest gift. If you'd like to celebrate us further, we've put together a registry with a few things we love.
+        </p>
+        <a
+          href="https://www.myregistry.com/giftlist/oliverika"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-8 inline-flex items-center gap-2 rounded-full bg-sage px-8 py-3 text-xs uppercase tracking-[0.4em] text-white shadow-lg shadow-sage/30 transition hover:-translate-y-0.5 hover:bg-sage-dark"
+        >
+          View our registry
+        </a>
+      </section>
+      </main>
+    </>
   )
 }
 
