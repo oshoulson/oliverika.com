@@ -17,7 +17,7 @@ const defaultDetails = [
   { label: 'Arrival', value: 'Guests at 4:00 PM' },
   { label: 'Venue', value: 'The Garden at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
-  { label: 'RSVP by', value: 'July 15, 2026' },
+  { label: 'RSVP by', value: 'July 31, 2026' },
 ]
 
 const tischDetails = [
@@ -26,7 +26,7 @@ const tischDetails = [
   { label: 'Ceremony', value: 'Chuppah at 4:30 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
-  { label: 'RSVP by', value: 'July 15, 2026' },
+  { label: 'RSVP by', value: 'July 31, 2026' },
 ]
 
 const travelNotes = [
@@ -471,7 +471,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     <>
       {!hasSubmitted && (
         <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
-          <span className="font-semibold">RSVP by July 15</span>
+          <span className="font-semibold">RSVP by July 31</span>
           {' — '}
           <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
         </div>
@@ -669,10 +669,9 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           <div className="space-y-4">
             <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
             <h2 className="font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
-            <p className="text-sm text-charcoal/80">We kindly request a response by <strong>July 15</strong> so we can finalize guest counts.</p>
+            <p className="text-sm text-charcoal/80">We kindly request a response by <strong>July 31</strong> so we can finalize guest counts.</p>
             <ul className="space-y-3 text-sm text-charcoal/75">
               <li>• Search your name or the name of anyone in your household to find your form.</li>
-              <li>• Plus-one invitations are noted on your envelope—only fill in guest info if applicable.</li>
               <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
             </ul>
           </div>
@@ -708,9 +707,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
                   <p className="font-semibold text-sage-dark">RSVP for {householdMatch?.envelopeName}</p>
                   <p className="text-charcoal/70">Please reply for each person on your invite.</p>
-                  {householdMatch?.plusOneAllowed && (
-                    <p className="mt-2 text-xs text-charcoal/70">Plus-one noted on your envelope.</p>
-                  )}
                   {isTischInvite && (
                     <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                       Tisch invite: please arrive by {TISCH_START_TIME} for singing, toasts, and ketubah signing before the ceremony.
