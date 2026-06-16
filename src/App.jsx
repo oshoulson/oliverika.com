@@ -37,7 +37,7 @@ const travelNotes = [
     linkText: 'Book your room',
   },
   { title: 'Getting There', text: 'The hotel is about a 15–20 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
-  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the carriage house.' },
+  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Honeywell Building.' },
 ]
 
 const dressCodePalette = [
@@ -67,7 +67,7 @@ const baseAgendaItems = [
     key: 'reception',
     time: '6:20 PM',
     title: 'Cocktail Hour into Reception',
-    description: 'Cocktail hour flows into dinner and dancing inside the carriage house. Event ends at 10:30 PM.',
+    description: 'Cocktail hour flows into dinner and dancing inside the Honeywell Building. Event ends at 10:30 PM.',
   },
 ]
 
