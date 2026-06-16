@@ -980,16 +980,8 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Registry</p>
         <h2 className="mt-4 font-serif text-4xl text-sage-dark">Gifts &amp; Registry</h2>
         <p className="mt-3 max-w-xl text-sm text-charcoal/80">
-          Your presence is truly the greatest gift. If you'd like to celebrate us further, we've put together a registry with a few things we love.
+          Coming soon — check back closer to the wedding for registry details.
         </p>
-        <a
-          href="https://www.myregistry.com/giftlist/oliverika"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-8 inline-flex items-center gap-2 rounded-full bg-sage px-8 py-3 text-xs uppercase tracking-[0.4em] text-white shadow-lg shadow-sage/30 transition hover:-translate-y-0.5 hover:bg-sage-dark"
-        >
-          View our registry
-        </a>
       </section>
       </main>
     </>
