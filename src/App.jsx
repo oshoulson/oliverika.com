@@ -259,40 +259,61 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     }
   }
 
-  const handleHouseholdSubmit = (event) => {
+  const handleHouseholdSubmit = async (event) => {
     event.preventDefault()
     if (!householdMatch || targetLocked) return
     setFormStatus('submitting')
     setFormError('')
+
+    // Build the updated household from the server-sourced match (not from
+    // localStorage, which on a guest's device only holds demo seed data).
+    const slugKey = getHouseholdSlugKey(householdMatch)
+    const guests = (householdMatch.guests || []).map((guest, index) => ({
+      ...guest,
+      rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
+      tischRsvp: normalizeTischRsvp(targetTischResponses[index], householdMatch?.tischInvited),
+      dietary: targetDietaries[index] || guest.dietary || 'None',
+    }))
+    const plusOneAccepted = householdMatch.plusOneAllowed ? targetPlusOne : false
+    const anyAccepted =
+      guests.some((guest) => ['Both events', 'Ceremony only', 'Reception only'].includes(normalizeRsvpStatus(guest.rsvpStatus))) ||
+      plusOneAccepted
+    const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !plusOneAccepted
+    const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
+    const refreshed = {
+      ...householdMatch,
+      email: targetEmail,
+      guests,
+      plusOneAccepted,
+      notes: targetNotes,
+      rsvpStatus,
+      rsvpLocked: true,
+    }
+
     try {
-      const households = loadInitialHouseholds()
-      const slugKey = getHouseholdSlugKey(householdMatch)
-      const updated = households.map((household) => {
-        if (getHouseholdSlugKey(household) !== slugKey) return household
-        const guests = (household.guests || []).map((guest, index) => ({
-          ...guest,
-          rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
-          tischRsvp: normalizeTischRsvp(targetTischResponses[index], householdMatch?.tischInvited),
-          dietary: targetDietaries[index] || guest.dietary || 'None',
-        }))
-        const plusOneAccepted = household.plusOneAllowed ? targetPlusOne : false
-        const anyAccepted =
-          guests.some((guest) => ['Both events', 'Ceremony only', 'Reception only'].includes(normalizeRsvpStatus(guest.rsvpStatus))) ||
-          plusOneAccepted
-        const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !plusOneAccepted
-        const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
-        return {
-          ...household,
-          email: targetEmail,
-          guests,
-          plusOneAccepted,
-          notes: targetNotes,
-          rsvpStatus,
-          rsvpLocked: true,
-        }
+      // Persist to the shared guest list (S3) so the RSVP reaches the manager.
+      // Without this the response only ever lived in the guest's own browser.
+      const response = await fetch(`${FUNCTIONS_BASE}/guest-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upserts: [refreshed] }),
       })
-      window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(updated))
-      const refreshed = updated.find((household) => getHouseholdSlugKey(household) === slugKey)
+      if (!response.ok) {
+        throw new Error('Save failed')
+      }
+
+      // Cache locally so a returning guest sees their saved answers immediately.
+      try {
+        const households = loadInitialHouseholds()
+        const hasMatch = households.some((household) => getHouseholdSlugKey(household) === slugKey)
+        const nextHouseholds = hasMatch
+          ? households.map((household) => (getHouseholdSlugKey(household) === slugKey ? refreshed : household))
+          : [...households, refreshed]
+        window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(nextHouseholds))
+      } catch (error) {
+        console.warn('Unable to cache RSVP locally', error)
+      }
+
       onHouseholdUpdate?.(refreshed)
       setTargetLocked(true)
       setFormStatus('success')
