@@ -524,9 +524,9 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
           </p>
           <p className="mt-1 font-bold">
-            Already RSVP'd? Please re-confirm by{' '}
-            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">typing a name from your household into the form</a>{' '}
-            and submitting again.
+            Already RSVP'd?{' '}
+            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">Type a name from your household into the form</a>{' '}
+            to confirm we've received it.
           </p>
         </div>
       )}
