@@ -217,6 +217,9 @@ const filterInputClass =
   'w-full rounded-lg border border-sage/25 bg-white px-2 py-1 text-xs shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
 const tableInputClass = `${inputClass} h-9 py-1 text-xs`
 const tableSelectClass = `${selectClass} h-9 py-1 text-xs`
+const mobileFieldLabelClass =
+  'flex flex-col gap-0.5 text-[0.7rem] font-semibold uppercase tracking-normal text-sage-dark/70'
+const mobileCheckboxLabelClass = 'flex items-center gap-2 text-sm font-medium text-charcoal/80'
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -1550,7 +1553,7 @@ export default function GuestListManager() {
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-[2270px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
@@ -2225,6 +2228,358 @@ export default function GuestListManager() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="md:hidden">
+          <div className="space-y-2 border-b border-sage/20 px-4 py-3">
+            <input
+              type="text"
+              value={filters.envelopeName}
+              onChange={(event) => handleFilterChange('envelopeName', event.target.value)}
+              className={inputClass}
+              placeholder="Search household"
+            />
+            <select
+              value={filters.rsvpStatus}
+              onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+              className={selectClass}
+            >
+              <option value="all">All RSVP statuses</option>
+              {rsvpOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-3 p-3">
+            {visibleHouseholds.map((household) => {
+              const isExpanded = expandedHouseholds.has(household.id)
+              const isMenuOpen = openMenuId === household.id
+              const locked = household.rsvpLocked
+              const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
+              const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
+              return (
+                <div key={household.id} className="rounded-2xl border border-sage/25 bg-white p-3 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <input
+                        type="text"
+                        value={household.envelopeName}
+                        onChange={(event) => updateHousehold(household.id, { envelopeName: event.target.value })}
+                        className={`${inputClass} font-semibold`}
+                        placeholder="Household name"
+                      />
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full bg-sage/15 px-2 py-1 text-xs font-semibold text-sage-dark">
+                          {guestCount} guest{guestCount === 1 ? '' : 's'}
+                        </span>
+                        {locked && (
+                          <span className="rounded-full bg-sage/10 px-2 py-1 text-xs font-semibold text-sage-dark/70">
+                            RSVP locked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setOpenMenuId(openMenuId === household.id ? null : household.id)}
+                        className="flex h-10 w-10 items-center justify-center rounded-full border border-sage/40 bg-white text-lg font-semibold text-sage-dark shadow-sm transition hover:border-sage"
+                        aria-haspopup="menu"
+                        aria-expanded={isMenuOpen}
+                      >
+                        ⋯
+                      </button>
+                      {isMenuOpen && (
+                        <div className="absolute right-0 z-50 mt-2 w-44 rounded-xl border border-sage/30 bg-white p-2 text-left shadow-lg">
+                          <button
+                            type="button"
+                            onClick={() => addGuest(household.id, 'primary')}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
+                          >
+                            Add guest
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeHousehold(household.id)}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                          >
+                            Remove household
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <label className={mobileFieldLabelClass}>
+                      RSVP
+                      <select
+                        value={household.rsvpStatus}
+                        onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
+                        className={selectClass}
+                        disabled={locked}
+                      >
+                        {rsvpOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={mobileFieldLabelClass}>
+                      Dietary
+                      <select
+                        value={household.dietaryRestrictions}
+                        onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
+                        className={selectClass}
+                      >
+                        {dietaryOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={mobileFieldLabelClass}>
+                      Table
+                      <input
+                        type="text"
+                        value={household.table}
+                        onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
+                        className={inputClass}
+                        placeholder="Table"
+                      />
+                    </label>
+                    <label className={mobileFieldLabelClass}>
+                      Invited by
+                      <select
+                        value={household.invitedBy}
+                        onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
+                        className={selectClass}
+                      >
+                        {invitedByOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    <label className={mobileCheckboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={household.invitationSent}
+                        onChange={() => updateHousehold(household.id, { invitationSent: !household.invitationSent })}
+                        className={checkboxClass}
+                      />
+                      Invite sent
+                    </label>
+                    <label className={mobileCheckboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={household.saveTheDateSent}
+                        onChange={() => updateHousehold(household.id, { saveTheDateSent: !household.saveTheDateSent })}
+                        className={checkboxClass}
+                      />
+                      Save the date
+                    </label>
+                    <label className={mobileCheckboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={household.plusOneAllowed}
+                        onChange={() =>
+                          updateHousehold(household.id, {
+                            plusOneAllowed: !household.plusOneAllowed,
+                            plusOneAccepted: household.plusOneAllowed ? false : household.plusOneAccepted,
+                          })
+                        }
+                        className={checkboxClass}
+                      />
+                      +1 allowed
+                    </label>
+                    <label className={mobileCheckboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={household.plusOneAccepted}
+                        onChange={() =>
+                          updateHousehold(household.id, {
+                            plusOneAccepted: household.plusOneAllowed ? !household.plusOneAccepted : false,
+                          })
+                        }
+                        className={checkboxClass}
+                        disabled={!household.plusOneAllowed || locked}
+                      />
+                      +1 accepted
+                    </label>
+                    <label className={mobileCheckboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={household.tischInvited}
+                        onChange={() => updateHousehold(household.id, { tischInvited: !household.tischInvited })}
+                        className={checkboxClass}
+                      />
+                      Tisch invited
+                    </label>
+                  </div>
+
+                  <details className="mt-2 rounded-xl border border-sage/20 bg-sage/5 px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-semibold text-sage-dark marker:text-sage-dark/60">
+                      Contact &amp; details
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <label className={mobileFieldLabelClass}>
+                        Email
+                        <input
+                          type="email"
+                          value={household.email}
+                          onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
+                          className={inputClass}
+                          placeholder="contact@email.com"
+                        />
+                      </label>
+                      <label className={mobileFieldLabelClass}>
+                        Phone
+                        <input
+                          type="tel"
+                          value={household.phone}
+                          onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
+                          className={inputClass}
+                          placeholder="(555) 123-4567"
+                        />
+                      </label>
+                      <label className={mobileFieldLabelClass}>
+                        Custom URL
+                        <input
+                          type="text"
+                          value={household.customSlug || ''}
+                          onChange={(event) => updateHousehold(household.id, { customSlug: event.target.value })}
+                          className={inputClass}
+                          placeholder="Optional"
+                        />
+                        <span className="text-[0.7rem] font-semibold normal-case tracking-normal text-sage-dark/60">
+                          /{household.slug}
+                        </span>
+                      </label>
+                      <div className={mobileFieldLabelClass}>
+                        Address
+                        <div className="flex items-center gap-2 normal-case tracking-normal">
+                          <span className="min-w-0 flex-1 truncate text-sm font-normal text-charcoal/80">
+                            {formatAddress(household.address)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAddressModalId(household.id)}
+                            className="shrink-0 rounded-full border border-sage/40 px-3 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                          >
+                            View / edit
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+
+                  <button
+                    type="button"
+                    onClick={() => toggleHouseholdExpanded(household.id)}
+                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sage/30 bg-white px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage"
+                  >
+                    {isExpanded ? 'Hide guests' : `Show ${household.guests.length} guest${household.guests.length === 1 ? '' : 's'}`}
+                  </button>
+
+                  {isExpanded && (
+                    <div className="mt-2 space-y-2">
+                      {household.guests.map((guest) => (
+                        <div
+                          key={`${household.id}-${guest.id}`}
+                          className="rounded-xl border border-sage/20 bg-sage/10 p-2.5"
+                          style={{ animation: 'guestRowFadeIn 200ms ease-out' }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={guest.name}
+                              onChange={(event) => updateGuest(household.id, guest.id, { name: event.target.value })}
+                              className={inputClass}
+                              placeholder="Guest name"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeGuest(household.id, guest.id)}
+                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white text-lg font-semibold text-rose-700 transition hover:border-rose-400"
+                              aria-label="Remove guest"
+                            >
+                              −
+                            </button>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
+                            <label className={mobileFieldLabelClass}>
+                              RSVP
+                              <select
+                                value={guest.rsvpStatus}
+                                onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
+                                className={selectClass}
+                                disabled={locked}
+                              >
+                                {rsvpOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className={mobileFieldLabelClass}>
+                              Dietary
+                              <select
+                                value={guest.dietary}
+                                onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
+                                className={selectClass}
+                                disabled={locked}
+                              >
+                                {dietaryOptions.map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {household.tischInvited && (
+                              <label className={`${mobileFieldLabelClass} col-span-2`}>
+                                Tisch RSVP
+                                <select
+                                  value={guest.tischRsvp}
+                                  onChange={(event) => updateGuest(household.id, guest.id, { tischRsvp: event.target.value })}
+                                  className={selectClass}
+                                  disabled={locked}
+                                >
+                                  {tischRsvpOptions
+                                    .filter((option) => option !== 'Not invited')
+                                    .map((option) => (
+                                      <option key={option} value={option}>
+                                        {option}
+                                      </option>
+                                    ))}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {visibleHouseholds.length === 0 && (
+              <p className="rounded-2xl border border-sage/20 bg-white px-3 py-6 text-center text-sm text-charcoal/70">
+                No households match the current filters.
+              </p>
+            )}
+          </div>
         </div>
       </div>
       {showSeatingView && (
