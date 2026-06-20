@@ -760,7 +760,11 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
               <form onSubmit={handleHouseholdSubmit} className="space-y-6" aria-disabled={targetLocked}>
                 <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
                   <p className="font-semibold text-sage-dark">RSVP for {householdMatch?.envelopeName}</p>
-                  <p className="text-charcoal/70">Please reply for each person on your invite.</p>
+                  {targetLocked ? (
+                    <p className="mt-1 font-semibold text-sage-dark">✓ We've already received your RSVP — your responses are shown below.</p>
+                  ) : (
+                    <p className="mt-1 text-charcoal/70">We don't have an RSVP from your household yet. Please reply for each person on your invite below.</p>
+                  )}
                   {isTischInvite && (
                     <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                       Tisch invite: please arrive by {TISCH_START_TIME} for singing, toasts, and ketubah signing before the ceremony.
