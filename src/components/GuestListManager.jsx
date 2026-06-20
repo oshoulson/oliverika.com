@@ -220,6 +220,30 @@ const tableSelectClass = `${selectClass} h-9 py-1 text-xs`
 const mobileFieldLabelClass =
   'flex flex-col gap-0.5 text-[0.7rem] font-semibold uppercase tracking-normal text-sage-dark/70'
 const mobileCheckboxLabelClass = 'flex items-center gap-2 text-sm font-medium text-charcoal/80'
+
+// View-only badges for the per-guest, all-events status grid on mobile cards.
+const eventRsvpBadge = (state) => {
+  switch (state) {
+    case 'yes':
+      return { label: 'Yes', className: 'bg-sage text-white' }
+    case 'no':
+      return { label: 'No', className: 'bg-rose-100 text-rose-700' }
+    case 'awaiting':
+      return { label: '—', className: 'bg-amber-100 text-amber-800' }
+    default:
+      return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  }
+}
+const ceremonyStateFor = (status) =>
+  status === 'Awaiting response' ? 'awaiting' : ['Both events', 'Ceremony only'].includes(status) ? 'yes' : 'no'
+const receptionStateFor = (status) =>
+  status === 'Awaiting response' ? 'awaiting' : ['Both events', 'Reception only'].includes(status) ? 'yes' : 'no'
+const tischStateFor = (tischRsvp, invited) => {
+  if (!invited || tischRsvp === 'Not invited') return 'na'
+  if (tischRsvp === 'Attending') return 'yes'
+  if (tischRsvp === 'Not attending') return 'no'
+  return 'awaiting'
+}
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -2425,6 +2449,43 @@ export default function GuestListManager() {
                       />
                       Tisch invited
                     </label>
+                  </div>
+
+                  <div className="mt-3">
+                    <p className="mb-1 text-[0.7rem] font-semibold uppercase text-sage-dark/70">Event RSVPs</p>
+                    <div className="overflow-hidden rounded-xl border border-sage/20">
+                      <table className="w-full table-fixed text-center text-xs">
+                        <thead className="bg-sage/10 text-sage-dark">
+                          <tr>
+                            <th className="w-2/5 px-2 py-1.5 text-left text-[0.6rem] font-semibold uppercase">Guest</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Ceremony</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Reception</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Tisch</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-sage/10">
+                          {household.guests.map((guest) => {
+                            const cer = eventRsvpBadge(ceremonyStateFor(guest.rsvpStatus))
+                            const rec = eventRsvpBadge(receptionStateFor(guest.rsvpStatus))
+                            const tisch = eventRsvpBadge(tischStateFor(guest.tischRsvp, household.tischInvited))
+                            return (
+                              <tr key={`${household.id}-${guest.id}-status`}>
+                                <td className="truncate px-2 py-1.5 text-left text-charcoal/80">{guest.name}</td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${cer.className}`}>{cer.label}</span>
+                                </td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${rec.className}`}>{rec.label}</span>
+                                </td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${tisch.className}`}>{tisch.label}</span>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
                   <details className="mt-2 rounded-xl border border-sage/20 bg-sage/5 px-3 py-2">
