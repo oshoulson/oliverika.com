@@ -1,9 +1,11 @@
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
+import { randomUUID } from 'node:crypto'
 import { getS3Client, BUCKET, KEY_PREFIX_WITH_SLASH } from '../../server/s3Client.js'
 
 const LEGACY_KEY = `${KEY_PREFIX_WITH_SLASH || ''}guest-list.json`
 const HOUSEHOLDS_PREFIX = `${KEY_PREFIX_WITH_SLASH || ''}guest-list/households/`
 const INDEX_KEY = `${KEY_PREFIX_WITH_SLASH || ''}guest-list/index.json`
+const HISTORY_PREFIX = `${KEY_PREFIX_WITH_SLASH || ''}guest-list/history/`
 const headers = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -106,6 +108,29 @@ const mapLimit = async (items, limit, mapper) => {
   return results
 }
 
+// Append-only backup. Every save and every delete writes an immutable,
+// timestamped snapshot under guest-list/history/<id>/ that is never overwritten
+// or removed, so data can be recovered after an accidental edit or deletion.
+// Best-effort: a history failure is logged but never fails the primary save.
+const writeHistorySnapshot = async (client, { id, action, household }) => {
+  if (!id) return
+  const recordedAt = new Date().toISOString()
+  const safeStamp = recordedAt.replace(/[:.]/g, '-')
+  const key = `${HISTORY_PREFIX}${encodeURIComponent(String(id))}/${safeStamp}-${randomUUID()}.json`
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: JSON.stringify({ id: String(id), action, recordedAt, household: household ?? null }),
+        ContentType: 'application/json',
+      }),
+    )
+  } catch (error) {
+    console.error('guest-list history write error', { id, action, error })
+  }
+}
+
 const handleGet = async () => {
   if (!BUCKET) {
     return bad(500, 'Missing S3 bucket configuration')
@@ -183,6 +208,7 @@ const handlePost = async (event) => {
             ContentType: 'application/json',
           }),
         )
+        await writeHistorySnapshot(client, { id: household.id, action: 'upsert', household })
       })
       const indexBody = JSON.stringify({ householdIds: deduped.map((household) => String(household.id)), updatedAt: new Date().toISOString() })
       await client.send(
@@ -234,11 +260,20 @@ const handlePost = async (event) => {
           ContentType: 'application/json',
         }),
       )
+      await writeHistorySnapshot(client, { id: household.id, action: 'upsert', household })
     })
 
     upsertHouseholds.forEach((household) => householdIdSet.add(String(household.id)))
 
     await mapLimit(deleteIds, 8, async (id) => {
+      // Capture the last known state before removing it, so deletions are recoverable.
+      let lastState = null
+      try {
+        lastState = await getJsonObject(householdKeyForId(id))
+      } catch (error) {
+        console.error('guest-list pre-delete read error', { id, error })
+      }
+      await writeHistorySnapshot(client, { id, action: 'delete', household: lastState })
       await client.send(
         new DeleteObjectCommand({
           Bucket: BUCKET,
