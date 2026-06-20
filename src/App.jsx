@@ -518,12 +518,19 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     <>
       {!hasSubmitted && (
         <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
-          <span className="font-semibold">RSVP by July 31</span>
-          {' — '}
-          <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
+          <p>
+            <span className="font-semibold">RSVP by July 31</span>
+            {' — '}
+            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
+          </p>
+          <p className="mt-1 font-bold">
+            Already RSVP'd? Please re-confirm by{' '}
+            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">typing a name from your household into the form</a>{' '}
+            and submitting again.
+          </p>
         </div>
       )}
-      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-20' : ''}`}>
+      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-36 sm:pt-24' : ''}`}>
       <section className="relative mx-auto flex min-h-[520px] max-w-5xl flex-col overflow-hidden rounded-2xl bg-bone shadow-frame md:min-h-[600px] md:flex-row" id="home">
         <div className="flex flex-col justify-between bg-sage px-6 py-10 text-bone md:w-1/2 md:px-8 lg:px-10">
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 md:flex-nowrap md:gap-6 md:text-[0.65rem] md:tracking-[0.5em]">
