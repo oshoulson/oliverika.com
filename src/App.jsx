@@ -518,12 +518,19 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     <>
       {!hasSubmitted && (
         <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
-          <span className="font-semibold">RSVP by July 31</span>
-          {' — '}
-          <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
+          <p>
+            <span className="font-semibold">RSVP by July 31</span>
+            {' — '}
+            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
+          </p>
+          <p className="mt-1 font-bold">
+            Already RSVP'd?{' '}
+            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">Type a name from your household into the form</a>{' '}
+            to confirm we've received it.
+          </p>
         </div>
       )}
-      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-20' : ''}`}>
+      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-36 sm:pt-24' : ''}`}>
       <section className="relative mx-auto flex min-h-[520px] max-w-5xl flex-col overflow-hidden rounded-2xl bg-bone shadow-frame md:min-h-[600px] md:flex-row" id="home">
         <div className="flex flex-col justify-between bg-sage px-6 py-10 text-bone md:w-1/2 md:px-8 lg:px-10">
           <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 md:flex-nowrap md:gap-6 md:text-[0.65rem] md:tracking-[0.5em]">
@@ -753,7 +760,11 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
               <form onSubmit={handleHouseholdSubmit} className="space-y-6" aria-disabled={targetLocked}>
                 <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
                   <p className="font-semibold text-sage-dark">RSVP for {householdMatch?.envelopeName}</p>
-                  <p className="text-charcoal/70">Please reply for each person on your invite.</p>
+                  {targetLocked ? (
+                    <p className="mt-1 font-semibold text-sage-dark">✓ We've already received your RSVP — your responses are shown below.</p>
+                  ) : (
+                    <p className="mt-1 text-charcoal/70">We don't have an RSVP from your household yet. Please reply for each person on your invite below.</p>
+                  )}
                   {isTischInvite && (
                     <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                       Tisch invite: please arrive by {TISCH_START_TIME} for singing, toasts, and ketubah signing before the ceremony.
