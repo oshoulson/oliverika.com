@@ -43,6 +43,13 @@ The `/.netlify/functions/submit-rsvp` function appends every submission to a Goo
 - **Server-side dedupe**: `submit-rsvp` now checks the sheet for an existing row with the same email. If found, it updates that row instead of appending, so Google Sheets stays clean even if someone re-submits from another device.
 - **Client-side nudge**: The browser stores a `localStorage` flag after a successful submission, disables the form, and shows a small notice with an “Update RSVP” button. Guests can still update if needed, but they won’t accidentally double-submit from the same device.
 
+## Guest list storage & backups
+
+- The guest list manager and the household RSVP form both read/write through `/.netlify/functions/guest-list`, which stores each household as a JSON object in S3 under `guest-list/households/<id>.json` (with an `guest-list/index.json` manifest).
+- **Append-only history**: every save (RSVP submission or manager edit) and every deletion also writes an immutable, timestamped snapshot under `guest-list/history/<id>/<timestamp>-<uuid>.json`. These objects are never overwritten or deleted by the app, so a household can be recovered after an accidental edit or removal. Deletions snapshot the household's last known state before it is removed.
+- History writes are best-effort: if a snapshot fails it is logged but never blocks the primary save, so RSVPs always go through.
+- To recover, list the history objects for the affected household id and re-`POST` the desired snapshot's `household` back through the `guest-list` function as an `upserts` entry.
+
 ## Available scripts
 
 - `npm run dev` – Vite dev server (front end only; use `netlify dev` when you need serverless functions locally).
