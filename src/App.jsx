@@ -153,6 +153,10 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [galleryError, setGalleryError] = useState('')
   const [hasDoodle, setHasDoodle] = useState(false)
   const [targetResponses, setTargetResponses] = useState([])
+  // Per-guest record of which events were *explicitly* answered. The combined
+  // rsvpStatus enum can't distinguish "skipping reception" from "reception not
+  // decided yet", so we track that separately to drive the Skip button highlight.
+  const [eventTouched, setEventTouched] = useState([])
   const [targetTischResponses, setTargetTischResponses] = useState([])
   const [targetDietaries, setTargetDietaries] = useState([])
   const [targetNotes, setTargetNotes] = useState('')
@@ -185,6 +189,14 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     return 'Not attending'
   }
 
+  const markEventTouched = (index, updates) => {
+    setEventTouched((prev) => {
+      const next = [...prev]
+      next[index] = { ...(next[index] || { ceremony: false, reception: false }), ...updates }
+      return next
+    })
+  }
+
   const setEventAttendance = (index, eventKey, attending) => {
     setTargetResponses((prev) => {
       const next = [...prev]
@@ -197,6 +209,11 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       next[index] = statusFromSelections(selections)
       return next
     })
+    if (attending === null) {
+      markEventTouched(index, { ceremony: false, reception: false })
+    } else {
+      markEventTouched(index, { [eventKey]: true })
+    }
   }
 
   const setTischResponse = (index, value) => {
@@ -378,6 +395,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   useEffect(() => {
     if (!householdMatch) {
       setTargetResponses([])
+      setEventTouched([])
       setTargetTischResponses([])
       setTargetDietaries([])
       setTargetPlusOne(false)
@@ -389,6 +407,14 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       return
     }
     setTargetResponses((householdMatch.guests || []).map((guest) => normalizeRsvpStatus(guest.rsvpStatus)))
+    setEventTouched(
+      (householdMatch.guests || []).map((guest) => {
+        // A stored decisive status means both events were already answered;
+        // "Awaiting response" means neither has been touched yet.
+        const answered = normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response'
+        return { ceremony: answered, reception: answered }
+      }),
+    )
     setTargetTischResponses(
       (householdMatch.guests || []).map((guest) => normalizeTischRsvp(guest.tischRsvp, householdMatch.tischInvited)),
     )
@@ -760,12 +786,14 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                     })
                   const dietaryValue = targetDietaries[index] || 'None'
                   const tischValue = normalizeTischRsvp(targetTischResponses[index], isTischInvite)
+                  const touched = eventTouched[index] || { ceremony: false, reception: false }
                   const markNotAttending = () => {
                     setTargetResponses((prev) => {
                       const next = [...prev]
                       next[index] = 'Not attending'
                       return next
                     })
+                    markEventTouched(index, { ceremony: true, reception: true })
                     if (isTischInvite) {
                       setTischResponse(index, 'Not attending')
                     }
@@ -831,7 +859,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                               disabled={targetLocked}
                               onClick={() => setEventAttendance(index, 'ceremony', false)}
                               className={`rounded-full border px-4 py-2 transition ${
-                                !selections.ceremony && current !== 'Awaiting response'
+                                touched.ceremony && !selections.ceremony
                                   ? 'border-sage bg-sage text-white shadow-sm'
                                   : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
                               } disabled:cursor-not-allowed disabled:opacity-60`}
@@ -863,7 +891,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                               disabled={targetLocked}
                               onClick={() => setEventAttendance(index, 'reception', false)}
                               className={`rounded-full border px-4 py-2 transition ${
-                                !selections.reception && current !== 'Awaiting response'
+                                touched.reception && !selections.reception
                                   ? 'border-sage bg-sage text-white shadow-sm'
                                   : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
                               } disabled:cursor-not-allowed disabled:opacity-60`}
