@@ -244,6 +244,11 @@ const tischStateFor = (tischRsvp, invited) => {
   if (tischRsvp === 'Not attending') return 'no'
   return 'awaiting'
 }
+// A household counts as "responded" once its RSVP is locked in from the form,
+// or any guest has a decided (non-awaiting) response.
+const hasResponded = (household) =>
+  Boolean(household?.rsvpLocked) ||
+  (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response')
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -265,6 +270,7 @@ const createDefaultFilters = () => ({
   plusOneAccepted: 'any',
   tischInvited: 'any',
   rsvpStatus: 'all',
+  responseReceived: 'any',
   dietaryRestrictions: '',
   table: '',
   email: '',
@@ -294,6 +300,7 @@ const sanitizeViewPrefs = (prefs) => {
   if (!['any', 'yes', 'no'].includes(filters.plusOneAccepted)) filters.plusOneAccepted = 'any'
   if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
   if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
+  if (!['any', 'received', 'not'].includes(filters.responseReceived)) filters.responseReceived = 'any'
 
   const expandedRaw = prefs.expanded && typeof prefs.expanded === 'object' ? prefs.expanded : null
   const expandedMode = expandedRaw?.mode === 'none' ? 'none' : expandedRaw?.mode === 'all' ? 'all' : null
@@ -961,6 +968,11 @@ export default function GuestListManager() {
       if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
       if (!boolMatches(household.tischInvited, filters.tischInvited)) return false
       if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
+      if (filters.responseReceived !== 'any') {
+        const responded = hasResponded(household)
+        if (filters.responseReceived === 'received' && !responded) return false
+        if (filters.responseReceived === 'not' && responded) return false
+      }
       if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
       if (filters.table && !textIncludes(household.table, filters.table)) return false
       if (filters.email && !textIncludes(household.email, filters.email)) return false
@@ -2264,16 +2276,13 @@ export default function GuestListManager() {
               placeholder="Search household"
             />
             <select
-              value={filters.rsvpStatus}
-              onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+              value={filters.responseReceived}
+              onChange={(event) => handleFilterChange('responseReceived', event.target.value)}
               className={selectClass}
             >
-              <option value="all">All RSVP statuses</option>
-              {rsvpOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
+              <option value="any">All households</option>
+              <option value="received">Response received</option>
+              <option value="not">Response not received</option>
             </select>
           </div>
 
