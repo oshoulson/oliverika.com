@@ -1,10 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { readJsonCookie, writeCookie, deleteCookie } from '../utils/cookies.js'
 /* eslint-disable react-refresh/only-export-components */
 
 const AUTH_STORAGE_KEY = 'oliverikaGuestListAuth'
 export const DATA_STORAGE_KEY = 'oliverikaGuestListData'
-const HIDDEN_COLUMNS_KEY = 'oliverikaGuestHiddenColumns'
 const VIEW_PREFS_KEY = 'oliverikaGuestListViewPrefs'
 const PASSWORD = import.meta.env.VITE_GUEST_LIST_PASSWORD || 'macbeth'
 const FUNCTIONS_BASE = '/.netlify/functions'
@@ -190,50 +189,22 @@ const rsvpOptions = ['Awaiting response', 'Both events', 'Ceremony only', 'Recep
 const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
 const invitedByOptions = ['Bride', 'Groom', 'Both']
 const tischRsvpOptions = ['Awaiting response', 'Attending', 'Not attending', 'Not invited']
-const toggleableColumnLabels = {
-  customSlug: 'Custom URL',
-  invitedBy: 'Invited by',
-  invitationSent: 'Invite sent',
-  saveTheDateSent: 'Save the date',
-  plusOneAllowed: '+1 allowed',
-  plusOneAccepted: '+1 accepted',
-  tischInvited: 'Tisch invited',
-  rsvpStatus: 'RSVP',
-  dietaryRestrictions: 'Dietary',
-  table: 'Table',
-  email: 'Email',
-  phone: 'Phone',
-  address: 'Address',
-}
-const tableColumnKeys = Object.keys(toggleableColumnLabels)
-const sortableColumnKeys = ['envelopeName', ...tableColumnKeys]
+const eventStatusFilterOptions = [
+  { value: 'all', label: 'All' },
+  { value: 'yes', label: 'Attending' },
+  { value: 'no', label: 'Not attending' },
+  { value: 'awaiting', label: 'Awaiting' },
+]
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
 const selectClass =
   'w-full rounded-lg border border-sage/30 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
 const inputClass =
   'w-full rounded-lg border border-sage/20 bg-white/90 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
-const filterInputClass =
-  'w-full rounded-lg border border-sage/25 bg-white px-2 py-1 text-xs shadow-sm outline-none transition focus:border-sage focus:ring-2 focus:ring-sage/30'
-const tableInputClass = `${inputClass} h-9 py-1 text-xs`
-const tableSelectClass = `${selectClass} h-9 py-1 text-xs`
 const mobileFieldLabelClass =
   'flex flex-col gap-0.5 text-[0.7rem] font-semibold uppercase tracking-normal text-sage-dark/70'
 const mobileCheckboxLabelClass = 'flex items-center gap-2 text-sm font-medium text-charcoal/80'
 
-// View-only badges for the per-guest, all-events status grid on mobile cards.
-const eventRsvpBadge = (state) => {
-  switch (state) {
-    case 'yes':
-      return { label: 'Yes', className: 'bg-sage text-white' }
-    case 'no':
-      return { label: 'No', className: 'bg-rose-100 text-rose-700' }
-    case 'awaiting':
-      return { label: '—', className: 'bg-amber-100 text-amber-800' }
-    default:
-      return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
-  }
-}
 const ceremonyStateFor = (status) =>
   status === 'Awaiting response' ? 'awaiting' : ['Both events', 'Ceremony only'].includes(status) ? 'yes' : 'no'
 const receptionStateFor = (status) =>
@@ -249,6 +220,44 @@ const tischStateFor = (tischRsvp, invited) => {
 const hasResponded = (household) =>
   Boolean(household?.rsvpLocked) ||
   (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response')
+
+// Per-guest, per-event state used by the summary list badges.
+const guestEventState = (household, guest, eventKey) => {
+  if (eventKey === 'tischRsvp') {
+    return tischStateFor(guest.tischRsvp, household?.tischInvited)
+  }
+  const status = normalizeRsvpStatus(guest.rsvpStatus)
+  if (eventKey === 'ceremonyRsvp') return ceremonyStateFor(status)
+  return receptionStateFor(status)
+}
+
+// Aggregate badge for a household + event: "attending/total", color by mix.
+const eventSummaryBadge = (household, eventKey) => {
+  const guests = household?.guests || []
+  if (eventKey === 'tischRsvp' && !household?.tischInvited) {
+    return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  }
+  let yes = 0
+  let no = 0
+  let awaiting = 0
+  let total = 0
+  guests.forEach((guest) => {
+    const state = guestEventState(household, guest, eventKey)
+    if (state === 'na') return
+    total += 1
+    if (state === 'yes') yes += 1
+    else if (state === 'no') no += 1
+    else awaiting += 1
+  })
+  if (total === 0) {
+    return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  }
+  const label = `${yes}/${total}`
+  if (yes === total) return { label, className: 'bg-sage text-white' }
+  if (yes === 0 && no > 0 && awaiting === 0) return { label, className: 'bg-rose-100 text-rose-700' }
+  return { label, className: 'bg-amber-100 text-amber-800' }
+}
+
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -271,6 +280,9 @@ const createDefaultFilters = () => ({
   tischInvited: 'any',
   rsvpStatus: 'all',
   responseReceived: 'any',
+  ceremonyStatus: 'all',
+  receptionStatus: 'all',
+  tischStatus: 'all',
   dietaryRestrictions: '',
   table: '',
   email: '',
@@ -280,9 +292,6 @@ const createDefaultFilters = () => ({
 
 const sanitizeViewPrefs = (prefs) => {
   if (!prefs || typeof prefs !== 'object') return null
-  const sortConfig = prefs.sortConfig && typeof prefs.sortConfig === 'object' ? prefs.sortConfig : {}
-  const sortKey = typeof sortConfig.key === 'string' && sortableColumnKeys.includes(sortConfig.key) ? sortConfig.key : 'envelopeName'
-  const sortDirection = sortConfig.direction === 'desc' ? 'desc' : 'asc'
 
   const defaultFilters = createDefaultFilters()
   const rawFilters = prefs.filters && typeof prefs.filters === 'object' ? prefs.filters : {}
@@ -293,6 +302,7 @@ const sanitizeViewPrefs = (prefs) => {
     }),
   )
 
+  const eventStatusValues = ['all', 'yes', 'no', 'awaiting']
   if (!['all', ...invitedByOptions].includes(filters.invitedBy)) filters.invitedBy = 'all'
   if (!['any', 'yes', 'no'].includes(filters.invitationSent)) filters.invitationSent = 'any'
   if (!['any', 'yes', 'no'].includes(filters.saveTheDateSent)) filters.saveTheDateSent = 'any'
@@ -301,15 +311,12 @@ const sanitizeViewPrefs = (prefs) => {
   if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
   if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
   if (!['any', 'received', 'not'].includes(filters.responseReceived)) filters.responseReceived = 'any'
-
-  const expandedRaw = prefs.expanded && typeof prefs.expanded === 'object' ? prefs.expanded : null
-  const expandedMode = expandedRaw?.mode === 'none' ? 'none' : expandedRaw?.mode === 'all' ? 'all' : null
-  const expandedIds = Array.isArray(expandedRaw?.ids) ? expandedRaw.ids.filter((id) => typeof id === 'string') : []
+  if (!eventStatusValues.includes(filters.ceremonyStatus)) filters.ceremonyStatus = 'all'
+  if (!eventStatusValues.includes(filters.receptionStatus)) filters.receptionStatus = 'all'
+  if (!eventStatusValues.includes(filters.tischStatus)) filters.tischStatus = 'all'
 
   return {
     filters,
-    sortConfig: { key: sortKey, direction: sortDirection },
-    expanded: expandedMode ? { mode: expandedMode, ids: expandedIds.slice(0, 250) } : null,
     showSeatingView: typeof prefs.showSeatingView === 'boolean' ? prefs.showSeatingView : null,
   }
 }
@@ -326,64 +333,21 @@ const loadViewPrefs = () => {
   }
 }
 
-const createExpandedPref = (households, expandedSet) => {
-  const expandedIds = []
-  const collapsedIds = []
-  for (const household of households || []) {
-    const id = household?.id
-    if (!id) continue
-    if (expandedSet?.has?.(id)) {
-      expandedIds.push(id)
-    } else {
-      collapsedIds.push(id)
-    }
-  }
-
-  if (expandedIds.length <= collapsedIds.length) {
-    return { mode: 'none', ids: expandedIds }
-  }
-  return { mode: 'all', ids: collapsedIds }
-}
-
-const applyExpandedPref = (households, expandedPref) => {
-  const allIds = (households || []).map((household) => household.id)
-  const allSet = new Set(allIds)
-
-  if (!expandedPref || !expandedPref.mode) {
-    return new Set(allIds)
-  }
-
-  const ids = Array.isArray(expandedPref.ids) ? expandedPref.ids : []
-  if (expandedPref.mode === 'none') {
-    const next = new Set()
-    ids.forEach((id) => {
-      if (allSet.has(id)) next.add(id)
-    })
-    return next
-  }
-
-  const next = new Set(allIds)
-  ids.forEach((id) => next.delete(id))
-  return next
-}
-
 const persistViewPrefs = (prefs) => {
   if (typeof window === 'undefined') return
   const payload = { v: 1, ...prefs }
   const maxCookieLength = 3800
 
-  const attemptCookieWrite = (candidate) => {
-    try {
-      const encoded = encodeURIComponent(JSON.stringify(candidate))
-      if (encoded.length > maxCookieLength) return false
+  let cookieWritten = false
+  try {
+    const encoded = encodeURIComponent(JSON.stringify(payload))
+    if (encoded.length <= maxCookieLength) {
       writeCookie(VIEW_PREFS_KEY, encoded, { maxAgeSeconds: 60 * 60 * 24 * 365 })
-      return true
-    } catch {
-      return false
+      cookieWritten = true
     }
+  } catch {
+    cookieWritten = false
   }
-
-  const cookieWritten = attemptCookieWrite(payload) || attemptCookieWrite({ ...payload, expanded: payload.expanded ? { ...payload.expanded, ids: [] } : null })
   if (!cookieWritten) {
     deleteCookie(VIEW_PREFS_KEY)
   }
@@ -432,19 +396,6 @@ const blankHousehold = () => ({
   },
   ],
 })
-
-const loadHiddenColumns = () => {
-  if (typeof window === 'undefined') return new Set()
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(HIDDEN_COLUMNS_KEY) || '[]')
-    if (Array.isArray(stored)) {
-      return new Set(stored.filter((key) => tableColumnKeys.includes(key)))
-    }
-  } catch (error) {
-    console.warn('Unable to read hidden columns', error)
-  }
-  return new Set()
-}
 
 const normalizeRsvpStatus = (status) => {
   const value = (status || '').trim()
@@ -519,30 +470,18 @@ export default function GuestListManager() {
   const [authError, setAuthError] = useState('')
   const [households, setHouseholds] = useState(initialHouseholds)
   const householdsRef = useRef(initialHouseholds)
-  const [expandedHouseholds, setExpandedHouseholds] = useState(() => applyExpandedPref(initialHouseholds, initialViewPrefs?.expanded))
-  const expandedHouseholdsRef = useRef(expandedHouseholds)
-  const [openMenuId, setOpenMenuId] = useState(null)
-  const [isMobile, setIsMobile] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
-  )
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false)
   const [showSeatingView, setShowSeatingView] = useState(Boolean(initialViewPrefs?.showSeatingView))
-  const [hiddenColumns, setHiddenColumns] = useState(loadHiddenColumns)
-  const [sortConfig, setSortConfig] = useState(initialViewPrefs?.sortConfig || { key: 'envelopeName', direction: 'asc' })
   const [filters, setFilters] = useState(() => ({ ...createDefaultFilters(), ...(initialViewPrefs?.filters || {}) }))
-  const [showFloatingAdd, setShowFloatingAdd] = useState(false)
-  const [draftHousehold, setDraftHousehold] = useState(null)
-  const [addressModalId, setAddressModalId] = useState(null)
+  const [selectedHouseholdId, setSelectedHouseholdId] = useState(null)
   const saveTimer = useRef(null)
   const viewPrefsTimer = useRef(null)
   const isSavingRef = useRef(false)
   const dirtyUpsertsRef = useRef(new Set())
   const dirtyDeletesRef = useRef(new Set())
   const exportMenuRef = useRef(null)
-  const columnsMenuRef = useRef(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -555,19 +494,6 @@ export default function GuestListManager() {
       console.warn('Unable to read guest list auth flag', error)
     }
   }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return () => {}
-    const mq = window.matchMedia('(max-width: 767px)')
-    const handler = (event) => setIsMobile(event.matches)
-    setIsMobile(mq.matches)
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
-
-  useEffect(() => {
-    expandedHouseholdsRef.current = expandedHouseholds
-  }, [expandedHouseholds])
 
   useEffect(() => {
     householdsRef.current = households
@@ -583,23 +509,13 @@ export default function GuestListManager() {
   }, [households])
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      window.localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-    } catch (error) {
-      console.warn('Unable to persist hidden columns', error)
-    }
-  }, [hiddenColumns])
-
-  useEffect(() => {
     if (typeof window === 'undefined') return () => {}
     if (viewPrefsTimer.current) {
       clearTimeout(viewPrefsTimer.current)
     }
 
     viewPrefsTimer.current = setTimeout(() => {
-      const expandedPref = createExpandedPref(householdsRef.current, expandedHouseholdsRef.current)
-      persistViewPrefs({ filters, sortConfig, expanded: expandedPref, showSeatingView })
+      persistViewPrefs({ filters, showSeatingView })
     }, 200)
 
     return () => {
@@ -607,7 +523,7 @@ export default function GuestListManager() {
         clearTimeout(viewPrefsTimer.current)
       }
     }
-  }, [filters, sortConfig, expandedHouseholds, showSeatingView])
+  }, [filters, showSeatingView])
 
   useEffect(() => {
     let cancelled = false
@@ -626,10 +542,6 @@ export default function GuestListManager() {
         const mapped = data.households.map(ensureDerivedFields)
         if (!cancelled) {
           setHouseholds(mapped)
-          setExpandedHouseholds(() => {
-            const expandedPref = createExpandedPref(householdsRef.current, expandedHouseholdsRef.current)
-            return applyExpandedPref(mapped, expandedPref)
-          })
           try {
             window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(mapped))
           } catch (error) {
@@ -655,23 +567,10 @@ export default function GuestListManager() {
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined') return () => {}
-    const handleScroll = () => {
-      setShowFloatingAdd(window.scrollY > 280)
-    }
-    handleScroll()
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  useEffect(() => {
     if (typeof document === 'undefined') return () => {}
     const handleClickOutside = (event) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
         setExportMenuOpen(false)
-      }
-      if (columnsMenuRef.current && !columnsMenuRef.current.contains(event.target)) {
-        setColumnsMenuOpen(false)
       }
     }
     document.addEventListener('click', handleClickOutside)
@@ -767,9 +666,9 @@ export default function GuestListManager() {
     return { invitations, guestCount, maxInvited, acceptedGuests, awaitingInvites, maxBreakdown }
   }, [households])
 
-  const addressModalHousehold = useMemo(
-    () => households.find((household) => household.id === addressModalId) || null,
-    [addressModalId, households],
+  const selectedHousehold = useMemo(
+    () => households.find((household) => household.id === selectedHouseholdId) || null,
+    [selectedHouseholdId, households],
   )
 
 
@@ -801,39 +700,12 @@ export default function GuestListManager() {
     }
   }
 
-  const toggleSort = (key) => {
-    setSortConfig((prev) => {
-      if (prev.key === key) {
-        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
-      }
-      return { key, direction: 'asc' }
-    })
-  }
-
   const handleFilterChange = (field, value) => {
     setFilters((prev) => ({ ...prev, [field]: value }))
   }
 
   const resetFilters = () => {
     setFilters(createDefaultFilters())
-  }
-
-  const isColumnVisible = (key) => !hiddenColumns.has(key)
-  const visibleColumnCount = tableColumnKeys.filter((key) => isColumnVisible(key)).length + 2
-
-  const renderSortIcon = (columnKey) => {
-    const active = sortConfig.key === columnKey
-    const directionClass = active && sortConfig.direction === 'asc' ? '-rotate-180' : ''
-    return (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-        className={`h-3 w-3 transition ${directionClass} ${active ? 'text-sage-dark' : 'text-sage-dark/40 group-hover:text-sage-dark/70'}`}
-      >
-        <path d="M5 8l5 5 5-5H5z" />
-      </svg>
-    )
   }
 
   const updateHousehold = (id, updates) => {
@@ -918,20 +790,12 @@ export default function GuestListManager() {
         return { ...household, guests: [...household.guests, newGuest] }
       }),
     )
-    setOpenMenuId(null)
     markHouseholdUpsert(householdId)
   }
 
   const removeHousehold = (householdId) => {
     setHouseholds((prev) => prev.filter((household) => household.id !== householdId))
-    setExpandedHouseholds((prev) => {
-      const next = new Set(prev)
-      next.delete(householdId)
-      return next
-    })
-    if (openMenuId === householdId) {
-      setOpenMenuId(null)
-    }
+    setSelectedHouseholdId((current) => (current === householdId ? null : current))
     markHouseholdDelete(householdId)
   }
 
@@ -946,94 +810,34 @@ export default function GuestListManager() {
     markHouseholdUpsert(householdId)
   }
 
-  const toggleHouseholdExpanded = (householdId) => {
-    setExpandedHouseholds((prev) => {
-      const next = new Set(prev)
-      if (next.has(householdId)) {
-        next.delete(householdId)
-      } else {
-        next.add(householdId)
-      }
-      return next
-    })
-  }
-
-  const expandAllHouseholds = () => {
-    setExpandedHouseholds(new Set(households.map((household) => household.id)))
-  }
-
-  const collapseAllHouseholds = () => {
-    setExpandedHouseholds(new Set())
-  }
-
   const visibleHouseholds = useMemo(() => {
     const textIncludes = (value, query) => String(value || '').toLowerCase().includes(String(query || '').toLowerCase())
-    const boolMatches = (value, filterValue) =>
-      filterValue === 'any' ? true : filterValue === 'yes' ? Boolean(value) : !value
+    const eventFilterMatches = (household, eventKey, filterValue) => {
+      if (filterValue === 'all') return true
+      return (household.guests || []).some((guest) => guestEventState(household, guest, eventKey) === filterValue)
+    }
     const filtered = households.filter((household) => {
-      // Name search applies in both views.
       if (filters.envelopeName && !textIncludes(household.envelopeName, filters.envelopeName)) return false
 
-      // Apply only the filters each view actually exposes, so a value set in one
-      // view can't become a stuck, invisible filter in the other.
-      if (isMobile) {
-        if (filters.responseReceived !== 'any') {
-          const responded = hasResponded(household)
-          if (filters.responseReceived === 'received' && !responded) return false
-          if (filters.responseReceived === 'not' && responded) return false
-        }
-        return true
+      if (filters.responseReceived !== 'any') {
+        const responded = hasResponded(household)
+        if (filters.responseReceived === 'received' && !responded) return false
+        if (filters.responseReceived === 'not' && responded) return false
       }
 
-      if (filters.customSlug && !textIncludes(household.customSlug || household.slug, filters.customSlug)) return false
       if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
-      if (!boolMatches(household.invitationSent, filters.invitationSent)) return false
-      if (!boolMatches(household.saveTheDateSent, filters.saveTheDateSent)) return false
-      if (!boolMatches(household.plusOneAllowed, filters.plusOneAllowed)) return false
-      if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
-      if (!boolMatches(household.tischInvited, filters.tischInvited)) return false
-      if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
-      if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
-      if (filters.table && !textIncludes(household.table, filters.table)) return false
-      if (filters.email && !textIncludes(household.email, filters.email)) return false
-      if (filters.phone && !textIncludes(household.phone, filters.phone)) return false
-      const addressText = `${household.address.line1} ${household.address.city} ${household.address.state} ${household.address.postalCode} ${household.address.country}`
-      if (filters.address && !textIncludes(addressText, filters.address)) return false
+
+      if (!eventFilterMatches(household, 'ceremonyRsvp', filters.ceremonyStatus)) return false
+      if (!eventFilterMatches(household, 'receptionRsvp', filters.receptionStatus)) return false
+      if (!eventFilterMatches(household, 'tischRsvp', filters.tischStatus)) return false
+
       return true
     })
 
-    const { key, direction } = sortConfig || {}
-    if (!key || !direction) return filtered
-
-    const sorted = [...filtered].sort((a, b) => {
-      const directionFactor = direction === 'desc' ? -1 : 1
-      const valueMap = (household) => {
-        switch (key) {
-          case 'invitationSent':
-          case 'saveTheDateSent':
-          case 'plusOneAllowed':
-          case 'plusOneAccepted':
-          case 'tischInvited':
-            return household[key] ? 1 : 0
-          case 'address':
-            return `${household.address.line1} ${household.address.city} ${household.address.state} ${household.address.postalCode} ${household.address.country}`.trim()
-          default:
-            return household[key] ?? ''
-        }
-      }
-
-      const normalizeValue = (val) => (typeof val === 'string' ? val.toLowerCase() : val)
-
-      const valueA = normalizeValue(valueMap(a))
-      const valueB = normalizeValue(valueMap(b))
-      if (typeof valueA === 'number' && typeof valueB === 'number') {
-        return (valueA - valueB) * directionFactor
-      }
-      return String(valueA).localeCompare(String(valueB)) * directionFactor
-    })
-
-    return sorted
-  }, [filters, households, sortConfig, isMobile])
+    return [...filtered].sort((a, b) =>
+      String(a.envelopeName || '').toLowerCase().localeCompare(String(b.envelopeName || '').toLowerCase()),
+    )
+  }, [filters, households])
 
   const seatingTables = useMemo(() => {
     const tableMap = new Map()
@@ -1244,75 +1048,13 @@ export default function GuestListManager() {
 
   const insertHousehold = (nextHousehold) => {
     setHouseholds((prev) => [...prev, nextHousehold])
-    setExpandedHouseholds((prev) => {
-      const next = new Set(prev)
-      next.add(nextHousehold.id)
-      return next
-    })
-    setOpenMenuId(null)
     markHouseholdUpsert(nextHousehold.id)
   }
 
-  const startNewHouseholdDraft = () => {
-    const nextHousehold = blankHousehold()
-    setOpenMenuId(null)
-    setDraftHousehold(nextHousehold)
-    setTimeout(() => {
-      const panel = document.getElementById('draft-household-panel')
-      panel?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 10)
-  }
-
-  const updateDraftField = (field, value) => {
-    setDraftHousehold((prev) => {
-      if (!prev) return prev
-      const next = { ...prev, [field]: value }
-      if (field === 'tischInvited') {
-        next.guests = (next.guests || []).map((guest) => ({
-          ...guest,
-          tischRsvp: normalizeTischRsvp(guest.tischRsvp, value),
-        }))
-      }
-      return next
-    })
-  }
-
-  const updateDraftAddressField = (field, value) => {
-    setDraftHousehold((prev) => (prev ? { ...prev, address: { ...prev.address, [field]: value } } : prev))
-  }
-
-  const updateDraftGuest = (guestId, updates) => {
-    setDraftHousehold((prev) => {
-      if (!prev) return prev
-      return {
-        ...prev,
-        guests: prev.guests.map((guest) =>
-          guest.id === guestId
-            ? { ...guest, ...updates, tischRsvp: normalizeTischRsvp(updates.tischRsvp || guest.tischRsvp, prev.tischInvited) }
-            : guest,
-        ),
-      }
-    })
-  }
-
-  const confirmDraftHousehold = () => {
-    if (!draftHousehold) return
-    const primaryGuestName = (draftHousehold.guests?.[0]?.name || '').trim()
-    const shouldReplacePrimary = !primaryGuestName || primaryGuestName.toLowerCase() === 'primary guest'
-    const alignedGuests = (draftHousehold.guests || []).map((guest, index) =>
-      index === 0 && shouldReplacePrimary ? { ...guest, name: draftHousehold.envelopeName } : guest,
-    )
-    const withSlug = ensureDerivedFields({
-      ...draftHousehold,
-      guests: alignedGuests,
-      slug: slugify(draftHousehold.envelopeName || 'New household'),
-    })
-    insertHousehold(withSlug)
-    setDraftHousehold(null)
-  }
-
-  const cancelDraftHousehold = () => {
-    setDraftHousehold(null)
+  const handleAddInvite = () => {
+    const nextHousehold = ensureDerivedFields(blankHousehold())
+    insertHousehold(nextHousehold)
+    setSelectedHouseholdId(nextHousehold.id)
   }
 
   const renderSeatingTables = () => {
@@ -1439,7 +1181,7 @@ export default function GuestListManager() {
         <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={startNewHouseholdDraft}
+              onClick={handleAddInvite}
               className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
             >
               Add invite
@@ -1495,26 +1237,89 @@ export default function GuestListManager() {
       </div>
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-sage/30 bg-white/85 shadow-frame">
-        <div className="flex flex-col gap-3 border-b border-sage/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-base font-semibold text-sage-dark">Guest table</p>
-            <p className="text-sm text-charcoal/70">Click a household to expand guests. Awaiting counts only include sent invitations.</p>
+        <div className="flex flex-col gap-3 border-b border-sage/20 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <label className={mobileFieldLabelClass}>
+              Search
+              <input
+                type="text"
+                value={filters.envelopeName}
+                onChange={(event) => handleFilterChange('envelopeName', event.target.value)}
+                className={inputClass}
+                placeholder="Search household"
+              />
+            </label>
+            <label className={mobileFieldLabelClass}>
+              Response
+              <select
+                value={filters.responseReceived}
+                onChange={(event) => handleFilterChange('responseReceived', event.target.value)}
+                className={selectClass}
+              >
+                <option value="any">All households</option>
+                <option value="received">Received</option>
+                <option value="not">Not received</option>
+              </select>
+            </label>
+            <label className={mobileFieldLabelClass}>
+              Invited by
+              <select
+                value={filters.invitedBy}
+                onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
+                className={selectClass}
+              >
+                <option value="all">All</option>
+                {invitedByOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={mobileFieldLabelClass}>
+              Ceremony
+              <select
+                value={filters.ceremonyStatus}
+                onChange={(event) => handleFilterChange('ceremonyStatus', event.target.value)}
+                className={selectClass}
+              >
+                {eventStatusFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={mobileFieldLabelClass}>
+              Reception
+              <select
+                value={filters.receptionStatus}
+                onChange={(event) => handleFilterChange('receptionStatus', event.target.value)}
+                className={selectClass}
+              >
+                {eventStatusFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={mobileFieldLabelClass}>
+              Tisch
+              <select
+                value={filters.tischStatus}
+                onChange={(event) => handleFilterChange('tischStatus', event.target.value)}
+                className={selectClass}
+              >
+                {eventStatusFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={expandAllHouseholds}
-              className="rounded-full border border-sage/40 px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-            >
-              Expand all
-            </button>
-            <button
-              type="button"
-              onClick={collapseAllHouseholds}
-              className="rounded-full border border-sage/40 px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-            >
-              Collapse all
-            </button>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
             <button
               type="button"
               onClick={resetFilters}
@@ -1522,58 +1327,6 @@ export default function GuestListManager() {
             >
               Clear filters
             </button>
-            <div className="relative z-30" ref={columnsMenuRef}>
-              <button
-                type="button"
-                onClick={() => setColumnsMenuOpen((open) => !open)}
-                className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-              >
-                Columns
-              </button>
-              {columnsMenuOpen && (
-                <div className="absolute right-0 z-40 mt-2 w-60 rounded-xl border border-sage/30 bg-white p-3 shadow-lg">
-                  <div className="mb-2 flex items-center justify-between text-xs font-semibold text-sage-dark/80">
-                    <button
-                      type="button"
-                      onClick={() => setHiddenColumns(new Set())}
-                      className="rounded-full border border-sage/30 px-2 py-1 transition hover:border-sage hover:text-sage-dark"
-                    >
-                      Show all
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHiddenColumns(new Set(tableColumnKeys))}
-                      className="rounded-full border border-sage/30 px-2 py-1 transition hover:border-sage hover:text-sage-dark"
-                    >
-                      Hide all
-                    </button>
-                  </div>
-                  <div className="space-y-1">
-                    {tableColumnKeys.map((key) => (
-                      <label key={key} className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm font-semibold text-sage-dark hover:bg-sage/10">
-                        <input
-                          type="checkbox"
-                          checked={isColumnVisible(key)}
-                          onChange={(event) =>
-                            setHiddenColumns((prev) => {
-                              const next = new Set(prev)
-                              if (event.target.checked) {
-                                next.delete(key)
-                              } else {
-                                next.add(key)
-                              }
-                              return next
-                            })
-                          }
-                          className="h-4 w-4 rounded border border-sage/50 text-sage-dark focus:ring-sage"
-                        />
-                        {toggleableColumnLabels[key]}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
             <div className="relative z-30" ref={exportMenuRef}>
               <button
                 type="button"
@@ -1609,786 +1362,157 @@ export default function GuestListManager() {
             </div>
           </div>
         </div>
-        <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-[2270px] divide-y divide-sage/20 text-sm">
-            <thead className="bg-sage/10 text-left text-sage-dark">
-              <tr className="text-sm font-semibold">
-                <th className="sticky left-0 z-40 px-3 py-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.08)]">
-                  <button type="button" onClick={() => toggleSort('envelopeName')} className="group flex items-center gap-2">
-                    <span>Name</span>
-                    {renderSortIcon('envelopeName')}
-                  </button>
-                </th>
-                {isColumnVisible('customSlug') && (
-                  <th className="px-3 py-2 w-[220px]">
-                    <button type="button" onClick={() => toggleSort('customSlug')} className="group flex items-center gap-2">
-                      <span>Custom URL</span>
-                      {renderSortIcon('customSlug')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('invitedBy') && (
-                  <th className="px-3 py-2 w-[150px]">
-                    <button type="button" onClick={() => toggleSort('invitedBy')} className="group flex items-center gap-2">
-                      <span>Invited by</span>
-                      {renderSortIcon('invitedBy')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('invitationSent') && (
-                  <th className="px-3 py-2 w-[150px]">
-                    <button type="button" onClick={() => toggleSort('invitationSent')} className="group flex items-center gap-2">
-                      <span>Invite sent</span>
-                      {renderSortIcon('invitationSent')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('saveTheDateSent') && (
-                  <th className="px-3 py-2 w-[160px]">
-                    <button type="button" onClick={() => toggleSort('saveTheDateSent')} className="group flex items-center gap-2">
-                      <span>Save the date</span>
-                      {renderSortIcon('saveTheDateSent')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('plusOneAllowed') && (
-                  <th className="px-3 py-2 w-[160px]">
-                    <button type="button" onClick={() => toggleSort('plusOneAllowed')} className="group flex items-center gap-2">
-                      <span>+1 allowed</span>
-                      {renderSortIcon('plusOneAllowed')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('plusOneAccepted') && (
-                  <th className="px-3 py-2 w-[170px]">
-                    <button type="button" onClick={() => toggleSort('plusOneAccepted')} className="group flex items-center gap-2">
-                      <span>+1 accepted</span>
-                      {renderSortIcon('plusOneAccepted')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('tischInvited') && (
-                  <th className="px-3 py-2 w-[170px]">
-                    <button type="button" onClick={() => toggleSort('tischInvited')} className="group flex items-center gap-2">
-                      <span>Tisch</span>
-                      {renderSortIcon('tischInvited')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('rsvpStatus') && (
-                  <th className="px-3 py-2 w-[190px]">
-                    <button type="button" onClick={() => toggleSort('rsvpStatus')} className="group flex items-center gap-2">
-                      <span>RSVP</span>
-                      {renderSortIcon('rsvpStatus')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('dietaryRestrictions') && (
-                  <th className="px-3 py-2 w-[190px]">
-                    <button type="button" onClick={() => toggleSort('dietaryRestrictions')} className="group flex items-center gap-2">
-                      <span>Dietary</span>
-                      {renderSortIcon('dietaryRestrictions')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('table') && (
-                  <th className="px-3 py-2 w-[150px]">
-                    <button type="button" onClick={() => toggleSort('table')} className="group flex items-center gap-2">
-                      <span>Table</span>
-                      {renderSortIcon('table')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('email') && (
-                  <th className="px-3 py-2 w-[260px]">
-                    <button type="button" onClick={() => toggleSort('email')} className="group flex items-center gap-2">
-                      <span>Email</span>
-                      {renderSortIcon('email')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('phone') && (
-                  <th className="px-3 py-2 w-[170px]">
-                    <button type="button" onClick={() => toggleSort('phone')} className="group flex items-center gap-2">
-                      <span>Phone</span>
-                      {renderSortIcon('phone')}
-                    </button>
-                  </th>
-                )}
-                {isColumnVisible('address') && (
-                  <th className="px-3 py-2 w-[420px]">
-                    <button type="button" onClick={() => toggleSort('address')} className="group flex items-center gap-2">
-                      <span>Address</span>
-                      {renderSortIcon('address')}
-                    </button>
-                  </th>
-                )}
-                <th className="sticky right-0 px-3 py-2 w-[110px] text-right bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
-                  Menu
-                </th>
-              </tr>
-              <tr className="text-xs text-sage-dark/80">
-                <th className="sticky left-0 z-20 px-3 pb-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]">
-                  <input
-                    type="text"
-                    value={filters.envelopeName}
-                    onChange={(event) => handleFilterChange('envelopeName', event.target.value)}
-                    className={filterInputClass}
-                    placeholder="Search household"
-                  />
-                </th>
-                {isColumnVisible('customSlug') && (
-                  <th className="px-3 pb-2 w-[220px]">
-                    <input
-                      type="text"
-                      value={filters.customSlug}
-                      onChange={(event) => handleFilterChange('customSlug', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Slug search"
-                    />
-                  </th>
-                )}
-                {isColumnVisible('invitedBy') && (
-                  <th className="px-3 pb-2 w-[150px]">
-                    <select
-                      value={filters.invitedBy}
-                      onChange={(event) => handleFilterChange('invitedBy', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="all">All</option>
-                      {invitedByOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('invitationSent') && (
-                  <th className="px-3 pb-2 w-[150px]">
-                    <select
-                      value={filters.invitationSent}
-                      onChange={(event) => handleFilterChange('invitationSent', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Sent</option>
-                      <option value="no">Not sent</option>
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('saveTheDateSent') && (
-                  <th className="px-3 pb-2 w-[160px]">
-                    <select
-                      value={filters.saveTheDateSent}
-                      onChange={(event) => handleFilterChange('saveTheDateSent', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Sent</option>
-                      <option value="no">Not sent</option>
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('plusOneAllowed') && (
-                  <th className="px-3 pb-2 w-[160px]">
-                    <select
-                      value={filters.plusOneAllowed}
-                      onChange={(event) => handleFilterChange('plusOneAllowed', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Allowed</option>
-                      <option value="no">Not allowed</option>
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('plusOneAccepted') && (
-                  <th className="px-3 pb-2 w-[170px]">
-                    <select
-                      value={filters.plusOneAccepted}
-                      onChange={(event) => handleFilterChange('plusOneAccepted', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Accepted</option>
-                      <option value="no">Not accepted</option>
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('tischInvited') && (
-                  <th className="px-3 pb-2 w-[170px]">
-                    <select
-                      value={filters.tischInvited}
-                      onChange={(event) => handleFilterChange('tischInvited', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Invited</option>
-                      <option value="no">Not invited</option>
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('rsvpStatus') && (
-                  <th className="px-3 pb-2 w-[190px]">
-                    <select
-                      value={filters.rsvpStatus}
-                      onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="all">All</option>
-                      {rsvpOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </th>
-                )}
-                {isColumnVisible('dietaryRestrictions') && (
-                  <th className="px-3 pb-2 w-[190px]">
-                    <input
-                      type="text"
-                      value={filters.dietaryRestrictions}
-                      onChange={(event) => handleFilterChange('dietaryRestrictions', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Filter dietary"
-                    />
-                  </th>
-                )}
-                {isColumnVisible('table') && (
-                  <th className="px-3 pb-2 w-[150px]">
-                    <input
-                      type="text"
-                      value={filters.table}
-                      onChange={(event) => handleFilterChange('table', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Table"
-                    />
-                  </th>
-                )}
-                {isColumnVisible('email') && (
-                  <th className="px-3 pb-2 w-[260px]">
-                    <input
-                      type="text"
-                      value={filters.email}
-                      onChange={(event) => handleFilterChange('email', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Email"
-                    />
-                  </th>
-                )}
-                {isColumnVisible('phone') && (
-                  <th className="px-3 pb-2 w-[170px]">
-                    <input
-                      type="text"
-                      value={filters.phone}
-                      onChange={(event) => handleFilterChange('phone', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Phone"
-                    />
-                  </th>
-                )}
-                {isColumnVisible('address') && (
-                  <th className="px-3 pb-2 w-[420px]">
-                    <input
-                      type="text"
-                      value={filters.address}
-                      onChange={(event) => handleFilterChange('address', event.target.value)}
-                      className={filterInputClass}
-                      placeholder="Address search"
-                    />
-                  </th>
-                )}
-                <th className="sticky right-0 px-3 pb-2 w-[110px] bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-sage/20">
-              {visibleHouseholds.map((household) => {
-                const isExpanded = expandedHouseholds.has(household.id)
-                const isMenuOpen = openMenuId === household.id
-                const locked = household.rsvpLocked
-                const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
-                const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
-                return (
-                  <Fragment key={household.id}>
-                    <tr
-                      className={`relative ${isMenuOpen ? 'z-40' : 'z-10'} bg-white shadow-lg shadow-sage/25 transition duration-200 ${
-                        isExpanded ? 'ring-1 ring-sage/15' : ''
-                      }`}
-                      style={isExpanded ? { animation: 'householdPulse 180ms ease-out' } : undefined}
-                    >
-                      <td
-                        className={`sticky left-0 ${isMenuOpen ? 'z-40' : 'z-10'} px-3 py-2 w-[260px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.04)]`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleHouseholdExpanded(household.id)}
-                            className="flex h-7 w-7 items-center justify-center rounded-full border border-sage/40 bg-white text-sage-dark shadow-sm transition hover:border-sage"
-                            aria-label={isExpanded ? 'Collapse household' : 'Expand household'}
-                          >
-                            <svg
-                              aria-hidden="true"
-                              viewBox="0 0 20 20"
-                              fill="none"
-                              className={`h-4 w-4 transition ${isExpanded ? 'rotate-180' : ''}`}
-                            >
-                              <path d="M5 8l5 5 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          </button>
-                          {!isExpanded && (
-                            <span className="whitespace-nowrap rounded-full bg-sage/15 px-2 py-1 text-[0.75rem] font-semibold text-sage-dark">
-                              {guestCount} guest{guestCount === 1 ? '' : 's'}
-                            </span>
-                          )}
-                          <div className="flex-1">
-                            <input
-                              type="text"
-                              value={household.envelopeName}
-                              onChange={(event) => updateHousehold(household.id, { envelopeName: event.target.value })}
-                              className={tableInputClass}
-                              placeholder="Household name"
-                            />
-                            {locked && (
-                              <p className="mt-1 text-xs font-semibold text-sage-dark/70">RSVP locked</p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      {isColumnVisible('customSlug') && (
-                        <td className="px-3 py-2 w-[220px]">
-                          <input
-                            type="text"
-                            value={household.customSlug || ''}
-                            onChange={(event) => updateHousehold(household.id, { customSlug: event.target.value })}
-                            className={tableInputClass}
-                            placeholder="Optional"
-                          />
-                          <p className="mt-1 truncate text-[0.7rem] font-semibold text-sage-dark/60" title={`/${household.slug}`}>
-                            /{household.slug}
-                          </p>
-                        </td>
-                      )}
-                      {isColumnVisible('invitedBy') && (
-                        <td className="px-3 py-2 w-[150px]">
-                          <select
-                            value={household.invitedBy}
-                            onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
-                            className={tableSelectClass}
-                          >
-                            {invitedByOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {isColumnVisible('invitationSent') && (
-                        <td className="px-3 py-2 w-[150px]">
-                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                            <input
-                              type="checkbox"
-                              checked={household.invitationSent}
-                              onChange={() => updateHousehold(household.id, { invitationSent: !household.invitationSent })}
-                              className={checkboxClass}
-                            />
-                            Sent
-                          </label>
-                        </td>
-                      )}
-                      {isColumnVisible('saveTheDateSent') && (
-                        <td className="px-3 py-2 w-[160px]">
-                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                            <input
-                              type="checkbox"
-                              checked={household.saveTheDateSent}
-                              onChange={() => updateHousehold(household.id, { saveTheDateSent: !household.saveTheDateSent })}
-                              className={checkboxClass}
-                            />
-                            Sent
-                          </label>
-                        </td>
-                      )}
-                      {isColumnVisible('plusOneAllowed') && (
-                        <td className="px-3 py-2 w-[160px]">
-                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                            <input
-                              type="checkbox"
-                              checked={household.plusOneAllowed}
-                              onChange={() =>
-                                updateHousehold(household.id, {
-                                  plusOneAllowed: !household.plusOneAllowed,
-                                  plusOneAccepted: household.plusOneAllowed ? false : household.plusOneAccepted,
-                                })
-                              }
-                              className={checkboxClass}
-                            />
-                            Allowed
-                          </label>
-                        </td>
-                      )}
-                      {isColumnVisible('plusOneAccepted') && (
-                        <td className="px-3 py-2 w-[170px]">
-                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                            <input
-                              type="checkbox"
-                              checked={household.plusOneAccepted}
-                              onChange={() =>
-                                updateHousehold(household.id, {
-                                  plusOneAccepted: household.plusOneAllowed ? !household.plusOneAccepted : false,
-                                })
-                              }
-                              className={checkboxClass}
-                              disabled={!household.plusOneAllowed || locked}
-                            />
-                            Accepted
-                          </label>
-                        </td>
-                      )}
-                      {isColumnVisible('tischInvited') && (
-                        <td className="px-3 py-2 w-[170px]">
-                          <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                            <input
-                              type="checkbox"
-                              checked={household.tischInvited}
-                              onChange={() => updateHousehold(household.id, { tischInvited: !household.tischInvited })}
-                              className={checkboxClass}
-                            />
-                            Invited
-                          </label>
-                        </td>
-                      )}
-                      {isColumnVisible('rsvpStatus') && (
-                        <td className="px-3 py-2 w-[190px]">
-                          <select
-                            value={household.rsvpStatus}
-                            onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
-                            className={tableSelectClass}
-                            disabled={locked}
-                          >
-                            {rsvpOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {isColumnVisible('dietaryRestrictions') && (
-                        <td className="px-3 py-2 w-[190px]">
-                          <select
-                            value={household.dietaryRestrictions}
-                            onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
-                            className={tableSelectClass}
-                          >
-                            {dietaryOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {isColumnVisible('table') && (
-                        <td className="px-3 py-2 w-[150px]">
-                          <input
-                            type="text"
-                            value={household.table}
-                            onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
-                            className={tableInputClass}
-                            placeholder="Table"
-                          />
-                        </td>
-                      )}
-                      {isColumnVisible('email') && (
-                        <td className="px-3 py-2 w-[260px]">
-                          <input
-                            type="email"
-                            value={household.email}
-                            onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
-                            className={tableInputClass}
-                            placeholder="contact@email.com"
-                          />
-                        </td>
-                      )}
-                      {isColumnVisible('phone') && (
-                        <td className="px-3 py-2 w-[170px]">
-                          <input
-                            type="tel"
-                            value={household.phone}
-                            onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
-                            className={tableInputClass}
-                            placeholder="(555) 123-4567"
-                          />
-                        </td>
-                      )}
-                      {isColumnVisible('address') && (
-                        <td className="px-3 py-2 w-[420px]">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate text-sm text-charcoal/80" title={formatAddress(household.address)}>
-                              {formatAddress(household.address)}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setAddressModalId(household.id)}
-                              className="rounded-full border border-sage/40 px-2 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-                            >
-                              View / edit
-                            </button>
-                          </div>
-                        </td>
-                      )}
-                      <td
-                        className={`sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-white shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] ${
-                          isMenuOpen ? 'z-40' : 'z-10'
-                        }`}
-                      >
-                        <div className="relative inline-block text-left z-30">
-                          <button
-                            type="button"
-                            onClick={() => setOpenMenuId(openMenuId === household.id ? null : household.id)}
-                            className="flex h-10 w-10 items-center justify-center rounded-full border border-sage/40 bg-white text-lg font-semibold text-sage-dark shadow-sm transition hover:border-sage"
-                            aria-haspopup="menu"
-                            aria-expanded={openMenuId === household.id}
-                          >
-                            ⋯
-                          </button>
-                          {openMenuId === household.id && (
-                            <div className="absolute right-0 z-50 mt-2 w-44 rounded-xl border border-sage/30 bg-white p-2 text-left shadow-lg">
-                              <button
-                                type="button"
-                                onClick={() => addGuest(household.id, 'primary')}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
-                              >
-                                Add guest
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => removeHousehold(household.id)}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
-                              >
-                                Remove household
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
 
-                    {isExpanded &&
-                      household.guests.map((guest) => (
-                        <tr
-                          key={`${household.id}-${guest.id}`}
-                          className="bg-sage/10"
-                          style={{ animation: 'guestRowFadeIn 200ms ease-out' }}
-                        >
-                          <td className="sticky left-0 z-10 px-3 py-2 pl-10 w-[260px] bg-sage/10 shadow-[2px_0_0_rgba(0,0,0,0.04)]">
-                            <input
-                              type="text"
-                              value={guest.name}
-                              onChange={(event) => updateGuest(household.id, guest.id, { name: event.target.value })}
-                              className={tableInputClass}
-                              placeholder="Guest name"
-                            />
-                          </td>
-                          {isColumnVisible('customSlug') && <td className="px-3 py-2 w-[220px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('invitedBy') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('invitationSent') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('saveTheDateSent') && <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('plusOneAllowed') && <td className="px-3 py-2 w-[160px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('plusOneAccepted') && <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('tischInvited') && (
-                            <td className="px-3 py-2 w-[170px]">
-                              {household.tischInvited ? (
-                                <select
-                                  value={guest.tischRsvp}
-                                  onChange={(event) =>
-                                    updateGuest(household.id, guest.id, { tischRsvp: event.target.value })
-                                  }
-                                  className={tableSelectClass}
-                                  disabled={locked}
-                                >
-                                  {tischRsvpOptions
-                                    .filter((option) => option !== 'Not invited')
-                                    .map((option) => (
-                                      <option key={option} value={option}>
-                                        {option}
-                                      </option>
-                                    ))}
-                                </select>
-                              ) : (
-                                <span className="text-sm text-charcoal/60">Not invited</span>
-                              )}
-                            </td>
-                          )}
-                          {isColumnVisible('rsvpStatus') && (
-                            <td className="px-3 py-2 w-[190px]">
-                              <select
-                                value={guest.rsvpStatus}
-                                onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
-                                className={tableSelectClass}
-                                disabled={locked}
-                              >
-                                {rsvpOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          )}
-                          {isColumnVisible('dietaryRestrictions') && (
-                            <td className="px-3 py-2 w-[190px]">
-                              <select
-                                value={guest.dietary}
-                                onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
-                                className={tableSelectClass}
-                                disabled={locked}
-                              >
-                                {dietaryOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </td>
-                          )}
-                          {isColumnVisible('table') && <td className="px-3 py-2 w-[150px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('email') && <td className="px-3 py-2 w-[260px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('phone') && <td className="px-3 py-2 w-[170px] text-sm text-charcoal/60">—</td>}
-                          {isColumnVisible('address') && <td className="px-3 py-2 w-[420px] text-sm text-charcoal/60">—</td>}
-                          <td className="sticky right-0 px-3 py-2 w-[110px] text-right backdrop-blur bg-sage/10 shadow-[inset_1px_0_0_rgba(0,0,0,0.04)] z-20">
-                            <div className="flex justify-end">
-                              <button
-                                type="button"
-                                onClick={() => removeGuest(household.id, guest.id)}
-                                className="flex h-10 w-10 items-center justify-center rounded-full border border-rose-200 bg-white text-lg font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800"
-                              >
-                                −
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </Fragment>
-                )
-              })}
-              {visibleHouseholds.length === 0 && (
-                <tr>
-                  <td colSpan={visibleColumnCount} className="px-3 py-6 text-center text-sm text-charcoal/70">
-                    No households match the current filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="hidden border-b border-sage/20 bg-sage/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-sage-dark/80 md:grid md:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))_minmax(0,1fr)] md:gap-3">
+          <span>Household</span>
+          <span className="text-center">Response</span>
+          <span className="text-center">Ceremony</span>
+          <span className="text-center">Reception</span>
+          <span className="text-center">Tisch</span>
+          <span className="text-right">Table</span>
         </div>
 
-        <div className="md:hidden">
-          <div className="space-y-2 border-b border-sage/20 px-4 py-3">
-            <input
-              type="text"
-              value={filters.envelopeName}
-              onChange={(event) => handleFilterChange('envelopeName', event.target.value)}
-              className={inputClass}
-              placeholder="Search household"
-            />
-            <select
-              value={filters.responseReceived}
-              onChange={(event) => handleFilterChange('responseReceived', event.target.value)}
-              className={selectClass}
-            >
-              <option value="any">All households</option>
-              <option value="received">Response received</option>
-              <option value="not">Response not received</option>
-            </select>
-          </div>
-
-          <div className="space-y-3 p-3">
-            {visibleHouseholds.map((household) => {
-              const isMenuOpen = openMenuId === household.id
-              const locked = household.rsvpLocked
-              const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
-              const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
-              return (
-                <div key={household.id} className="rounded-2xl border border-sage/25 bg-white p-3 shadow-sm">
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <input
-                        type="text"
-                        value={household.envelopeName}
-                        onChange={(event) => updateHousehold(household.id, { envelopeName: event.target.value })}
-                        className={`${inputClass} font-semibold`}
-                        placeholder="Household name"
-                      />
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-sage/15 px-2 py-1 text-xs font-semibold text-sage-dark">
-                          {guestCount} guest{guestCount === 1 ? '' : 's'}
+        <div className="divide-y divide-sage/15">
+          {visibleHouseholds.map((household) => {
+            const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
+            const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
+            const responded = hasResponded(household)
+            const responseBadge = responded
+              ? { label: 'Received', className: 'bg-sage text-white' }
+              : { label: 'Awaiting', className: 'bg-amber-100 text-amber-800' }
+            const ceremony = eventSummaryBadge(household, 'ceremonyRsvp')
+            const reception = eventSummaryBadge(household, 'receptionRsvp')
+            const tisch = eventSummaryBadge(household, 'tischRsvp')
+            const isActive = selectedHouseholdId === household.id
+            return (
+              <button
+                key={household.id}
+                type="button"
+                onClick={() => setSelectedHouseholdId(household.id)}
+                className={`block w-full px-4 py-3 text-left transition hover:bg-sage/5 ${isActive ? 'bg-sage/10' : ''}`}
+              >
+                <div className="flex flex-col gap-2 md:grid md:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))_minmax(0,1fr)] md:items-center md:gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate font-semibold text-sage-dark">{household.envelopeName || 'Untitled household'}</span>
+                      {household.rsvpLocked && (
+                        <span className="shrink-0 rounded-full bg-sage/10 px-2 py-0.5 text-[0.65rem] font-semibold text-sage-dark/70">
+                          RSVP locked
                         </span>
-                        {locked && (
-                          <span className="rounded-full bg-sage/10 px-2 py-1 text-xs font-semibold text-sage-dark/70">
-                            RSVP locked
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="relative shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setOpenMenuId(openMenuId === household.id ? null : household.id)}
-                        className="flex h-10 w-10 items-center justify-center rounded-full border border-sage/40 bg-white text-lg font-semibold text-sage-dark shadow-sm transition hover:border-sage"
-                        aria-haspopup="menu"
-                        aria-expanded={isMenuOpen}
-                      >
-                        ⋯
-                      </button>
-                      {isMenuOpen && (
-                        <div className="absolute right-0 z-50 mt-2 w-44 rounded-xl border border-sage/30 bg-white p-2 text-left shadow-lg">
-                          <button
-                            type="button"
-                            onClick={() => addGuest(household.id, 'primary')}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
-                          >
-                            Add guest
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeHousehold(household.id)}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
-                          >
-                            Remove household
-                          </button>
-                        </div>
                       )}
                     </div>
+                    <p className="mt-0.5 text-xs text-charcoal/60">
+                      {guestCount} guest{guestCount === 1 ? '' : 's'}
+                    </p>
                   </div>
+                  <div className="flex items-center gap-2 md:justify-center">
+                    <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Response</span>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${responseBadge.className}`}>
+                      {responseBadge.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 md:justify-center">
+                    <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Ceremony</span>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${ceremony.className}`}>
+                      {ceremony.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 md:justify-center">
+                    <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Reception</span>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${reception.className}`}>
+                      {reception.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 md:justify-center">
+                    <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Tisch</span>
+                    <span className={`inline-block rounded-full px-2 py-0.5 text-[0.7rem] font-semibold ${tisch.className}`}>
+                      {tisch.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 md:justify-end">
+                    <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Table</span>
+                    <span className="truncate text-sm text-charcoal/80">{household.table || '—'}</span>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+          {visibleHouseholds.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-charcoal/70">No households match the current filters.</p>
+          )}
+        </div>
+      </div>
+      {selectedHousehold && (
+        <>
+          <button
+            type="button"
+            onClick={() => setSelectedHouseholdId(null)}
+            className="fixed inset-0 z-40 bg-black/25 backdrop-blur-sm"
+            aria-label="Close household editor"
+          />
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="flex h-full w-full flex-col bg-white shadow-2xl shadow-sage/30 md:max-w-xl md:border-l md:border-sage/30">
+              <div className="flex items-start justify-between gap-3 border-b border-sage/20 px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.3em] text-sage-dark/60">Household</p>
+                  <p className="truncate text-lg font-semibold text-sage-dark">
+                    {selectedHousehold.envelopeName || 'Untitled household'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => removeHousehold(selectedHousehold.id)}
+                    className="rounded-full border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800"
+                  >
+                    Remove household
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHouseholdId(null)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-sage/40 text-lg font-semibold text-sage-dark transition hover:border-sage"
+                    aria-label="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
 
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+                <section className="space-y-3">
+                  <p className="text-sm font-semibold text-sage-dark">Household details</p>
+                  <label className={mobileFieldLabelClass}>
+                    Household name
+                    <input
+                      type="text"
+                      value={selectedHousehold.envelopeName}
+                      onChange={(event) => updateHousehold(selectedHousehold.id, { envelopeName: event.target.value })}
+                      className={inputClass}
+                      placeholder="Household or envelope name"
+                    />
+                  </label>
+                  <label className={mobileFieldLabelClass}>
+                    Custom URL
+                    <input
+                      type="text"
+                      value={selectedHousehold.customSlug || ''}
+                      onChange={(event) => updateHousehold(selectedHousehold.id, { customSlug: event.target.value })}
+                      className={inputClass}
+                      placeholder="Optional"
+                    />
+                    <span className="text-[0.7rem] font-semibold normal-case tracking-normal text-sage-dark/60">
+                      /{selectedHousehold.slug}
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
                     <label className={mobileFieldLabelClass}>
-                      RSVP
+                      Invited by
                       <select
-                        value={household.rsvpStatus}
-                        onChange={(event) => updateHousehold(household.id, { rsvpStatus: event.target.value })}
-                        className={selectClass}
-                        disabled={locked}
-                      >
-                        {rsvpOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className={mobileFieldLabelClass}>
-                      Dietary
-                      <select
-                        value={household.dietaryRestrictions}
-                        onChange={(event) => updateHousehold(household.id, { dietaryRestrictions: event.target.value })}
+                        value={selectedHousehold.invitedBy}
+                        onChange={(event) => updateHousehold(selectedHousehold.id, { invitedBy: event.target.value })}
                         className={selectClass}
                       >
-                        {dietaryOptions.map((option) => (
+                        {invitedByOptions.map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>
@@ -2399,34 +1523,106 @@ export default function GuestListManager() {
                       Table
                       <input
                         type="text"
-                        value={household.table}
-                        onChange={(event) => updateHousehold(household.id, { table: event.target.value })}
+                        value={selectedHousehold.table}
+                        onChange={(event) => updateHousehold(selectedHousehold.id, { table: event.target.value })}
                         className={inputClass}
-                        placeholder="Table"
+                        placeholder="Table name or number"
+                      />
+                    </label>
+                  </div>
+                  <label className={mobileFieldLabelClass}>
+                    Household dietary
+                    <select
+                      value={selectedHousehold.dietaryRestrictions}
+                      onChange={(event) => updateHousehold(selectedHousehold.id, { dietaryRestrictions: event.target.value })}
+                      className={selectClass}
+                    >
+                      {dietaryOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className={mobileFieldLabelClass}>
+                      Email
+                      <input
+                        type="email"
+                        value={selectedHousehold.email}
+                        onChange={(event) => updateHousehold(selectedHousehold.id, { email: event.target.value })}
+                        className={inputClass}
+                        placeholder="contact@email.com"
                       />
                     </label>
                     <label className={mobileFieldLabelClass}>
-                      Invited by
-                      <select
-                        value={household.invitedBy}
-                        onChange={(event) => updateHousehold(household.id, { invitedBy: event.target.value })}
-                        className={selectClass}
-                      >
-                        {invitedByOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                      Phone
+                      <input
+                        type="tel"
+                        value={selectedHousehold.phone}
+                        onChange={(event) => updateHousehold(selectedHousehold.id, { phone: event.target.value })}
+                        className={inputClass}
+                        placeholder="(555) 123-4567"
+                      />
                     </label>
                   </div>
+                </section>
 
-                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                <section className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-sage-dark">Address</p>
+                    <p className="text-xs text-charcoal/60">{formatAddress(selectedHousehold.address)}</p>
+                  </div>
+                  <label className={mobileFieldLabelClass}>
+                    Street + unit
+                    <input
+                      type="text"
+                      value={selectedHousehold.address.line1}
+                      onChange={(event) => updateAddressField(selectedHousehold.id, 'line1', event.target.value)}
+                      className={inputClass}
+                      placeholder="123 Street Ave Apt 4"
+                    />
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <input
+                      type="text"
+                      value={selectedHousehold.address.city}
+                      onChange={(event) => updateAddressField(selectedHousehold.id, 'city', event.target.value)}
+                      className={inputClass}
+                      placeholder="City"
+                    />
+                    <input
+                      type="text"
+                      value={selectedHousehold.address.state}
+                      onChange={(event) => updateAddressField(selectedHousehold.id, 'state', event.target.value)}
+                      className={inputClass}
+                      placeholder="State"
+                    />
+                    <input
+                      type="text"
+                      value={selectedHousehold.address.postalCode}
+                      onChange={(event) => updateAddressField(selectedHousehold.id, 'postalCode', event.target.value)}
+                      className={inputClass}
+                      placeholder="Zip"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={selectedHousehold.address.country}
+                    onChange={(event) => updateAddressField(selectedHousehold.id, 'country', event.target.value)}
+                    className={inputClass}
+                    placeholder="Country"
+                  />
+                </section>
+
+                <section className="space-y-2">
+                  <p className="text-sm font-semibold text-sage-dark">Status</p>
+                  <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2">
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={household.invitationSent}
-                        onChange={() => updateHousehold(household.id, { invitationSent: !household.invitationSent })}
+                        checked={selectedHousehold.invitationSent}
+                        onChange={() => updateHousehold(selectedHousehold.id, { invitationSent: !selectedHousehold.invitationSent })}
                         className={checkboxClass}
                       />
                       Invite sent
@@ -2434,8 +1630,8 @@ export default function GuestListManager() {
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={household.saveTheDateSent}
-                        onChange={() => updateHousehold(household.id, { saveTheDateSent: !household.saveTheDateSent })}
+                        checked={selectedHousehold.saveTheDateSent}
+                        onChange={() => updateHousehold(selectedHousehold.id, { saveTheDateSent: !selectedHousehold.saveTheDateSent })}
                         className={checkboxClass}
                       />
                       Save the date
@@ -2443,11 +1639,11 @@ export default function GuestListManager() {
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={household.plusOneAllowed}
+                        checked={selectedHousehold.plusOneAllowed}
                         onChange={() =>
-                          updateHousehold(household.id, {
-                            plusOneAllowed: !household.plusOneAllowed,
-                            plusOneAccepted: household.plusOneAllowed ? false : household.plusOneAccepted,
+                          updateHousehold(selectedHousehold.id, {
+                            plusOneAllowed: !selectedHousehold.plusOneAllowed,
+                            plusOneAccepted: selectedHousehold.plusOneAllowed ? false : selectedHousehold.plusOneAccepted,
                           })
                         }
                         className={checkboxClass}
@@ -2457,131 +1653,148 @@ export default function GuestListManager() {
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={household.plusOneAccepted}
+                        checked={selectedHousehold.plusOneAccepted}
                         onChange={() =>
-                          updateHousehold(household.id, {
-                            plusOneAccepted: household.plusOneAllowed ? !household.plusOneAccepted : false,
+                          updateHousehold(selectedHousehold.id, {
+                            plusOneAccepted: selectedHousehold.plusOneAllowed ? !selectedHousehold.plusOneAccepted : false,
                           })
                         }
                         className={checkboxClass}
-                        disabled={!household.plusOneAllowed || locked}
+                        disabled={!selectedHousehold.plusOneAllowed || selectedHousehold.rsvpLocked}
                       />
                       +1 accepted
                     </label>
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={household.tischInvited}
-                        onChange={() => updateHousehold(household.id, { tischInvited: !household.tischInvited })}
+                        checked={selectedHousehold.tischInvited}
+                        onChange={() => updateHousehold(selectedHousehold.id, { tischInvited: !selectedHousehold.tischInvited })}
                         className={checkboxClass}
                       />
                       Tisch invited
                     </label>
                   </div>
+                </section>
 
-                  <div className="mt-3">
-                    <p className="mb-1 text-[0.7rem] font-semibold uppercase text-sage-dark/70">Event RSVPs</p>
-                    <div className="overflow-hidden rounded-xl border border-sage/20">
-                      <table className="w-full table-fixed text-center text-xs">
-                        <thead className="bg-sage/10 text-sage-dark">
-                          <tr>
-                            <th className="w-2/5 px-2 py-1.5 text-left text-[0.6rem] font-semibold uppercase">Guest</th>
-                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Ceremony</th>
-                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Reception</th>
-                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Tisch</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-sage/10">
-                          {household.guests.map((guest) => {
-                            const cer = eventRsvpBadge(ceremonyStateFor(guest.rsvpStatus))
-                            const rec = eventRsvpBadge(receptionStateFor(guest.rsvpStatus))
-                            const tisch = eventRsvpBadge(tischStateFor(guest.tischRsvp, household.tischInvited))
-                            return (
-                              <tr key={`${household.id}-${guest.id}-status`}>
-                                <td className="truncate px-2 py-1.5 text-left text-charcoal/80">{guest.name}</td>
-                                <td className="px-1 py-1.5">
-                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${cer.className}`}>{cer.label}</span>
-                                </td>
-                                <td className="px-1 py-1.5">
-                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${rec.className}`}>{rec.label}</span>
-                                </td>
-                                <td className="px-1 py-1.5">
-                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${tisch.className}`}>{tisch.label}</span>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-sage-dark">Guests</p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => addGuest(selectedHousehold.id, 'primary')}
+                        className="rounded-full bg-sage px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+                      >
+                        Add guest
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addGuest(selectedHousehold.id, 'plus-one')}
+                        className="rounded-full border border-sage/40 px-3 py-1.5 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                      >
+                        + Plus one
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addGuest(selectedHousehold.id, 'child')}
+                        className="rounded-full border border-sage/40 px-3 py-1.5 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                      >
+                        + Child
+                      </button>
                     </div>
                   </div>
-
-                  <details className="mt-2 rounded-xl border border-sage/20 bg-sage/5 px-3 py-2">
-                    <summary className="cursor-pointer text-sm font-semibold text-sage-dark marker:text-sage-dark/60">
-                      Contact &amp; details
-                    </summary>
-                    <div className="mt-2 space-y-2">
-                      <label className={mobileFieldLabelClass}>
-                        Email
-                        <input
-                          type="email"
-                          value={household.email}
-                          onChange={(event) => updateHousehold(household.id, { email: event.target.value })}
-                          className={inputClass}
-                          placeholder="contact@email.com"
-                        />
-                      </label>
-                      <label className={mobileFieldLabelClass}>
-                        Phone
-                        <input
-                          type="tel"
-                          value={household.phone}
-                          onChange={(event) => updateHousehold(household.id, { phone: event.target.value })}
-                          className={inputClass}
-                          placeholder="(555) 123-4567"
-                        />
-                      </label>
-                      <label className={mobileFieldLabelClass}>
-                        Custom URL
-                        <input
-                          type="text"
-                          value={household.customSlug || ''}
-                          onChange={(event) => updateHousehold(household.id, { customSlug: event.target.value })}
-                          className={inputClass}
-                          placeholder="Optional"
-                        />
-                        <span className="text-[0.7rem] font-semibold normal-case tracking-normal text-sage-dark/60">
-                          /{household.slug}
-                        </span>
-                      </label>
-                      <div className={mobileFieldLabelClass}>
-                        Address
-                        <div className="flex items-center gap-2 normal-case tracking-normal">
-                          <span className="min-w-0 flex-1 truncate text-sm font-normal text-charcoal/80">
-                            {formatAddress(household.address)}
-                          </span>
+                  <div className="space-y-3">
+                    {selectedHousehold.guests.map((guest) => (
+                      <div key={guest.id} className="rounded-xl border border-sage/20 bg-sage/5 p-3">
+                        <div className="flex items-start gap-2">
+                          <input
+                            type="text"
+                            value={guest.name}
+                            onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { name: event.target.value })}
+                            className={`${inputClass} font-semibold`}
+                            placeholder="Guest name"
+                          />
                           <button
                             type="button"
-                            onClick={() => setAddressModalId(household.id)}
-                            className="shrink-0 rounded-full border border-sage/40 px-3 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                            onClick={() => removeGuest(selectedHousehold.id, guest.id)}
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white text-lg font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800"
+                            aria-label="Remove guest"
                           >
-                            View / edit
+                            −
                           </button>
                         </div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <label className={mobileFieldLabelClass}>
+                            RSVP
+                            <select
+                              value={guest.rsvpStatus}
+                              onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { rsvpStatus: event.target.value })}
+                              className={selectClass}
+                              disabled={selectedHousehold.rsvpLocked}
+                            >
+                              {rsvpOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className={mobileFieldLabelClass}>
+                            Dietary
+                            <select
+                              value={guest.dietary}
+                              onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { dietary: event.target.value })}
+                              className={selectClass}
+                            >
+                              {dietaryOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {selectedHousehold.tischInvited && (
+                            <label className={`${mobileFieldLabelClass} sm:col-span-2`}>
+                              Tisch RSVP
+                              <select
+                                value={guest.tischRsvp}
+                                onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { tischRsvp: event.target.value })}
+                                className={selectClass}
+                                disabled={selectedHousehold.rsvpLocked}
+                              >
+                                {tischRsvpOptions
+                                  .filter((option) => option !== 'Not invited')
+                                  .map((option) => (
+                                    <option key={option} value={option}>
+                                      {option}
+                                    </option>
+                                  ))}
+                              </select>
+                            </label>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </details>
-                </div>
-              )
-            })}
-            {visibleHouseholds.length === 0 && (
-              <p className="rounded-2xl border border-sage/20 bg-white px-3 py-6 text-center text-sm text-charcoal/70">
-                No households match the current filters.
-              </p>
-            )}
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-2">
+                  <label className={mobileFieldLabelClass}>
+                    Notes
+                    <textarea
+                      rows={3}
+                      value={selectedHousehold.notes || ''}
+                      onChange={(event) => updateHousehold(selectedHousehold.id, { notes: event.target.value })}
+                      className={inputClass}
+                      placeholder="Any notes for this household"
+                    />
+                  </label>
+                </section>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
       {showSeatingView && (
         <>
           <button
@@ -2618,332 +1831,6 @@ export default function GuestListManager() {
             </div>
           </div>
         </>
-      )}
-      {addressModalHousehold && (
-        <>
-          <button
-            type="button"
-            onClick={() => setAddressModalId(null)}
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
-            aria-label="Close address editor"
-          />
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto px-4 pb-10 pt-20">
-            <div className="w-full max-w-xl rounded-2xl border border-sage/30 bg-white shadow-2xl shadow-sage/30">
-              <div className="flex items-center justify-between border-b border-sage/20 px-5 py-3">
-                <div>
-                  <p className="text-sm font-semibold text-sage-dark">Address for {addressModalHousehold.envelopeName}</p>
-                  <p className="text-xs text-charcoal/70">{formatAddress(addressModalHousehold.address)}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setAddressModalId(null)}
-                  className="rounded-full border border-sage/40 px-3 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-                >
-                  Done
-                </button>
-              </div>
-              <div className="space-y-3 px-5 py-4">
-                <label className="block text-xs font-semibold text-sage-dark/80">
-                  Street + unit
-                  <input
-                    type="text"
-                    value={addressModalHousehold.address.line1}
-                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'line1', event.target.value)}
-                    className={`${inputClass} mt-2`}
-                    placeholder="123 Street Ave Apt 4"
-                  />
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="text"
-                    value={addressModalHousehold.address.city}
-                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'city', event.target.value)}
-                    className={inputClass}
-                    placeholder="City"
-                  />
-                  <input
-                    type="text"
-                    value={addressModalHousehold.address.state}
-                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'state', event.target.value)}
-                    className={inputClass}
-                    placeholder="State"
-                  />
-                  <input
-                    type="text"
-                    value={addressModalHousehold.address.postalCode}
-                    onChange={(event) => updateAddressField(addressModalHousehold.id, 'postalCode', event.target.value)}
-                    className={inputClass}
-                    placeholder="Zip"
-                  />
-                </div>
-                <input
-                  type="text"
-                  value={addressModalHousehold.address.country}
-                  onChange={(event) => updateAddressField(addressModalHousehold.id, 'country', event.target.value)}
-                  className={inputClass}
-                  placeholder="Country"
-                />
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-      {draftHousehold && (
-        <>
-          <button
-            type="button"
-            onClick={cancelDraftHousehold}
-            className="fixed inset-0 z-40 bg-black/25 backdrop-blur-sm"
-            aria-label="Close new invite overlay"
-          />
-          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto px-4 pb-10 pt-14">
-            <form
-              id="draft-household-panel"
-              onSubmit={(event) => {
-                event.preventDefault()
-                confirmDraftHousehold()
-              }}
-              className="w-full max-w-6xl rounded-2xl border border-sage/30 bg-white shadow-2xl shadow-sage/30 transition duration-300 ease-out"
-            >
-              <div className="flex items-center justify-between border-b border-sage/20 px-6 py-4">
-                <div>
-                  <p className="text-sm font-semibold text-sage-dark">New invite (staged)</p>
-                  <p className="text-sm text-charcoal/70">Fill details, then add to table. You can add additional household guests once the entry is added.</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={cancelDraftHousehold}
-                    className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-full bg-sage px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sage-dark"
-                  >
-                    Add to table
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-4 px-6 py-6 lg:grid-cols-2">
-                <div className="space-y-3">
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Household name
-                    <input
-                      type="text"
-                      value={draftHousehold.envelopeName}
-                      onChange={(event) => updateDraftField('envelopeName', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="Household or envelope name"
-                      required
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Custom URL (optional)
-                    <input
-                      type="text"
-                      value={draftHousehold.customSlug || ''}
-                      onChange={(event) => updateDraftField('customSlug', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="Optional"
-                    />
-                    <p className="mt-1 truncate text-[0.7rem] font-semibold text-sage-dark/60" title={`/${normalizeSlug(draftHousehold.customSlug) || slugify(draftHousehold.envelopeName || 'household')}`}>
-                      /{normalizeSlug(draftHousehold.customSlug) || slugify(draftHousehold.envelopeName || 'household')}
-                    </p>
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Invited by
-                    <select
-                      value={draftHousehold.invitedBy}
-                      onChange={(event) => updateDraftField('invitedBy', event.target.value)}
-                      className={`${selectClass} mt-2`}
-                    >
-                      {invitedByOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                      <input
-                        type="checkbox"
-                        checked={draftHousehold.invitationSent}
-                        onChange={() => updateDraftField('invitationSent', !draftHousehold.invitationSent)}
-                        className={checkboxClass}
-                      />
-                      Invite sent
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                      <input
-                        type="checkbox"
-                        checked={draftHousehold.saveTheDateSent}
-                        onChange={() => updateDraftField('saveTheDateSent', !draftHousehold.saveTheDateSent)}
-                        className={checkboxClass}
-                      />
-                      Save the date
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                      <input
-                        type="checkbox"
-                        checked={draftHousehold.plusOneAllowed}
-                        onChange={() =>
-                          updateDraftField('plusOneAllowed', !draftHousehold.plusOneAllowed)
-                        }
-                        className={checkboxClass}
-                      />
-                      +1 allowed
-                    </label>
-                    <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                      <input
-                        type="checkbox"
-                        checked={draftHousehold.plusOneAccepted}
-                        onChange={() =>
-                          updateDraftField('plusOneAccepted', draftHousehold.plusOneAllowed ? !draftHousehold.plusOneAccepted : false)
-                        }
-                        className={checkboxClass}
-                        disabled={!draftHousehold.plusOneAllowed}
-                      />
-                      +1 accepted
-                    </label>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-charcoal/80">
-                    <input
-                      type="checkbox"
-                      checked={draftHousehold.tischInvited}
-                      onChange={() => updateDraftField('tischInvited', !draftHousehold.tischInvited)}
-                      className={checkboxClass}
-                    />
-                    Invite to tisch
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    RSVP
-                    <select
-                      value={draftHousehold.rsvpStatus}
-                      onChange={(event) => updateDraftField('rsvpStatus', event.target.value)}
-                      className={`${selectClass} mt-2`}
-                    >
-                      {rsvpOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Primary guest
-                    <input
-                      type="text"
-                      value={draftHousehold.guests[0]?.name || ''}
-                      onChange={(event) =>
-                        updateDraftGuest(draftHousehold.guests[0]?.id, { name: event.target.value })
-                      }
-                      className={`${inputClass} mt-2`}
-                      placeholder="Primary guest name"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Notes
-                    <textarea
-                      rows={3}
-                      value={draftHousehold.notes}
-                      onChange={(event) => updateDraftField('notes', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="Any notes for this household"
-                    />
-                  </label>
-                </div>
-                <div className="space-y-3">
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Table
-                    <input
-                      type="text"
-                      value={draftHousehold.table}
-                      onChange={(event) => updateDraftField('table', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="Table name or number"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Email
-                    <input
-                      type="email"
-                      value={draftHousehold.email}
-                      onChange={(event) => updateDraftField('email', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="contact@email.com"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Phone
-                    <input
-                      type="tel"
-                      value={draftHousehold.phone}
-                      onChange={(event) => updateDraftField('phone', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="(555) 123-4567"
-                    />
-                  </label>
-                  <label className="block text-xs font-semibold text-sage-dark/80">
-                    Address line
-                    <input
-                      type="text"
-                      value={draftHousehold.address.line1}
-                      onChange={(event) => updateDraftAddressField('line1', event.target.value)}
-                      className={`${inputClass} mt-2`}
-                      placeholder="Street + unit"
-                    />
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      value={draftHousehold.address.city}
-                      onChange={(event) => updateDraftAddressField('city', event.target.value)}
-                      className={inputClass}
-                      placeholder="City"
-                    />
-                    <input
-                      type="text"
-                      value={draftHousehold.address.state}
-                      onChange={(event) => updateDraftAddressField('state', event.target.value)}
-                      className={inputClass}
-                      placeholder="State"
-                    />
-                    <input
-                      type="text"
-                      value={draftHousehold.address.postalCode}
-                      onChange={(event) => updateDraftAddressField('postalCode', event.target.value)}
-                      className={inputClass}
-                      placeholder="Zip"
-                    />
-                  </div>
-                  <input
-                    type="text"
-                    value={draftHousehold.address.country}
-                    onChange={(event) => updateDraftAddressField('country', event.target.value)}
-                    className={inputClass}
-                    placeholder="Country"
-                  />
-                </div>
-              </div>
-            </form>
-          </div>
-        </>
-      )}
-      {showFloatingAdd && (
-        <button
-          type="button"
-          onClick={startNewHouseholdDraft}
-          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-sage px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-sage/40 transition hover:bg-sage-dark"
-          aria-label="Add invite"
-        >
-          +
-          <span className="hidden sm:inline">Add invite</span>
-        </button>
       )}
     </main>
   )
