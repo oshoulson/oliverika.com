@@ -220,6 +220,35 @@ const tableSelectClass = `${selectClass} h-9 py-1 text-xs`
 const mobileFieldLabelClass =
   'flex flex-col gap-0.5 text-[0.7rem] font-semibold uppercase tracking-normal text-sage-dark/70'
 const mobileCheckboxLabelClass = 'flex items-center gap-2 text-sm font-medium text-charcoal/80'
+
+// View-only badges for the per-guest, all-events status grid on mobile cards.
+const eventRsvpBadge = (state) => {
+  switch (state) {
+    case 'yes':
+      return { label: 'Yes', className: 'bg-sage text-white' }
+    case 'no':
+      return { label: 'No', className: 'bg-rose-100 text-rose-700' }
+    case 'awaiting':
+      return { label: '—', className: 'bg-amber-100 text-amber-800' }
+    default:
+      return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  }
+}
+const ceremonyStateFor = (status) =>
+  status === 'Awaiting response' ? 'awaiting' : ['Both events', 'Ceremony only'].includes(status) ? 'yes' : 'no'
+const receptionStateFor = (status) =>
+  status === 'Awaiting response' ? 'awaiting' : ['Both events', 'Reception only'].includes(status) ? 'yes' : 'no'
+const tischStateFor = (tischRsvp, invited) => {
+  if (!invited || tischRsvp === 'Not invited') return 'na'
+  if (tischRsvp === 'Attending') return 'yes'
+  if (tischRsvp === 'Not attending') return 'no'
+  return 'awaiting'
+}
+// A household counts as "responded" once its RSVP is locked in from the form,
+// or any guest has a decided (non-awaiting) response.
+const hasResponded = (household) =>
+  Boolean(household?.rsvpLocked) ||
+  (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response')
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -241,6 +270,7 @@ const createDefaultFilters = () => ({
   plusOneAccepted: 'any',
   tischInvited: 'any',
   rsvpStatus: 'all',
+  responseReceived: 'any',
   dietaryRestrictions: '',
   table: '',
   email: '',
@@ -270,6 +300,7 @@ const sanitizeViewPrefs = (prefs) => {
   if (!['any', 'yes', 'no'].includes(filters.plusOneAccepted)) filters.plusOneAccepted = 'any'
   if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
   if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
+  if (!['any', 'received', 'not'].includes(filters.responseReceived)) filters.responseReceived = 'any'
 
   const expandedRaw = prefs.expanded && typeof prefs.expanded === 'object' ? prefs.expanded : null
   const expandedMode = expandedRaw?.mode === 'none' ? 'none' : expandedRaw?.mode === 'all' ? 'all' : null
@@ -491,6 +522,9 @@ export default function GuestListManager() {
   const [expandedHouseholds, setExpandedHouseholds] = useState(() => applyExpandedPref(initialHouseholds, initialViewPrefs?.expanded))
   const expandedHouseholdsRef = useRef(expandedHouseholds)
   const [openMenuId, setOpenMenuId] = useState(null)
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
+  )
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -520,6 +554,15 @@ export default function GuestListManager() {
     } catch (error) {
       console.warn('Unable to read guest list auth flag', error)
     }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return () => {}
+    const mq = window.matchMedia('(max-width: 767px)')
+    const handler = (event) => setIsMobile(event.matches)
+    setIsMobile(mq.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
   }, [])
 
   useEffect(() => {
@@ -928,7 +971,20 @@ export default function GuestListManager() {
     const boolMatches = (value, filterValue) =>
       filterValue === 'any' ? true : filterValue === 'yes' ? Boolean(value) : !value
     const filtered = households.filter((household) => {
+      // Name search applies in both views.
       if (filters.envelopeName && !textIncludes(household.envelopeName, filters.envelopeName)) return false
+
+      // Apply only the filters each view actually exposes, so a value set in one
+      // view can't become a stuck, invisible filter in the other.
+      if (isMobile) {
+        if (filters.responseReceived !== 'any') {
+          const responded = hasResponded(household)
+          if (filters.responseReceived === 'received' && !responded) return false
+          if (filters.responseReceived === 'not' && responded) return false
+        }
+        return true
+      }
+
       if (filters.customSlug && !textIncludes(household.customSlug || household.slug, filters.customSlug)) return false
       if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
       if (!boolMatches(household.invitationSent, filters.invitationSent)) return false
@@ -977,7 +1033,7 @@ export default function GuestListManager() {
     })
 
     return sorted
-  }, [filters, households, sortConfig])
+  }, [filters, households, sortConfig, isMobile])
 
   const seatingTables = useMemo(() => {
     const tableMap = new Map()
@@ -2240,22 +2296,18 @@ export default function GuestListManager() {
               placeholder="Search household"
             />
             <select
-              value={filters.rsvpStatus}
-              onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+              value={filters.responseReceived}
+              onChange={(event) => handleFilterChange('responseReceived', event.target.value)}
               className={selectClass}
             >
-              <option value="all">All RSVP statuses</option>
-              {rsvpOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
+              <option value="any">All households</option>
+              <option value="received">Response received</option>
+              <option value="not">Response not received</option>
             </select>
           </div>
 
           <div className="space-y-3 p-3">
             {visibleHouseholds.map((household) => {
-              const isExpanded = expandedHouseholds.has(household.id)
               const isMenuOpen = openMenuId === household.id
               const locked = household.rsvpLocked
               const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
@@ -2427,6 +2479,43 @@ export default function GuestListManager() {
                     </label>
                   </div>
 
+                  <div className="mt-3">
+                    <p className="mb-1 text-[0.7rem] font-semibold uppercase text-sage-dark/70">Event RSVPs</p>
+                    <div className="overflow-hidden rounded-xl border border-sage/20">
+                      <table className="w-full table-fixed text-center text-xs">
+                        <thead className="bg-sage/10 text-sage-dark">
+                          <tr>
+                            <th className="w-2/5 px-2 py-1.5 text-left text-[0.6rem] font-semibold uppercase">Guest</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Ceremony</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Reception</th>
+                            <th className="px-1 py-1.5 text-[0.6rem] font-semibold uppercase">Tisch</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-sage/10">
+                          {household.guests.map((guest) => {
+                            const cer = eventRsvpBadge(ceremonyStateFor(guest.rsvpStatus))
+                            const rec = eventRsvpBadge(receptionStateFor(guest.rsvpStatus))
+                            const tisch = eventRsvpBadge(tischStateFor(guest.tischRsvp, household.tischInvited))
+                            return (
+                              <tr key={`${household.id}-${guest.id}-status`}>
+                                <td className="truncate px-2 py-1.5 text-left text-charcoal/80">{guest.name}</td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${cer.className}`}>{cer.label}</span>
+                                </td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${rec.className}`}>{rec.label}</span>
+                                </td>
+                                <td className="px-1 py-1.5">
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${tisch.className}`}>{tisch.label}</span>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   <details className="mt-2 rounded-xl border border-sage/20 bg-sage/5 px-3 py-2">
                     <summary className="cursor-pointer text-sm font-semibold text-sage-dark marker:text-sage-dark/60">
                       Contact &amp; details
@@ -2482,95 +2571,6 @@ export default function GuestListManager() {
                       </div>
                     </div>
                   </details>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleHouseholdExpanded(household.id)}
-                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sage/30 bg-white px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage"
-                  >
-                    {isExpanded ? 'Hide guests' : `Show ${household.guests.length} guest${household.guests.length === 1 ? '' : 's'}`}
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-2 space-y-2">
-                      {household.guests.map((guest) => (
-                        <div
-                          key={`${household.id}-${guest.id}`}
-                          className="rounded-xl border border-sage/20 bg-sage/10 p-2.5"
-                          style={{ animation: 'guestRowFadeIn 200ms ease-out' }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={guest.name}
-                              onChange={(event) => updateGuest(household.id, guest.id, { name: event.target.value })}
-                              className={inputClass}
-                              placeholder="Guest name"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeGuest(household.id, guest.id)}
-                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white text-lg font-semibold text-rose-700 transition hover:border-rose-400"
-                              aria-label="Remove guest"
-                            >
-                              −
-                            </button>
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            <label className={mobileFieldLabelClass}>
-                              RSVP
-                              <select
-                                value={guest.rsvpStatus}
-                                onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
-                                className={selectClass}
-                                disabled={locked}
-                              >
-                                {rsvpOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className={mobileFieldLabelClass}>
-                              Dietary
-                              <select
-                                value={guest.dietary}
-                                onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
-                                className={selectClass}
-                                disabled={locked}
-                              >
-                                {dietaryOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            {household.tischInvited && (
-                              <label className={`${mobileFieldLabelClass} col-span-2`}>
-                                Tisch RSVP
-                                <select
-                                  value={guest.tischRsvp}
-                                  onChange={(event) => updateGuest(household.id, guest.id, { tischRsvp: event.target.value })}
-                                  className={selectClass}
-                                  disabled={locked}
-                                >
-                                  {tischRsvpOptions
-                                    .filter((option) => option !== 'Not invited')
-                                    .map((option) => (
-                                      <option key={option} value={option}>
-                                        {option}
-                                      </option>
-                                    ))}
-                                </select>
-                              </label>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )
             })}
