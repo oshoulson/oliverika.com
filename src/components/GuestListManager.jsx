@@ -2308,7 +2308,6 @@ export default function GuestListManager() {
 
           <div className="space-y-3 p-3">
             {visibleHouseholds.map((household) => {
-              const isExpanded = expandedHouseholds.has(household.id)
               const isMenuOpen = openMenuId === household.id
               const locked = household.rsvpLocked
               const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
@@ -2572,95 +2571,6 @@ export default function GuestListManager() {
                       </div>
                     </div>
                   </details>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleHouseholdExpanded(household.id)}
-                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-sage/30 bg-white px-3 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage"
-                  >
-                    {isExpanded ? 'Hide guests' : `Show ${household.guests.length} guest${household.guests.length === 1 ? '' : 's'}`}
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-2 space-y-2">
-                      {household.guests.map((guest) => (
-                        <div
-                          key={`${household.id}-${guest.id}`}
-                          className="rounded-xl border border-sage/20 bg-sage/10 p-2.5"
-                          style={{ animation: 'guestRowFadeIn 200ms ease-out' }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={guest.name}
-                              onChange={(event) => updateGuest(household.id, guest.id, { name: event.target.value })}
-                              className={inputClass}
-                              placeholder="Guest name"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => removeGuest(household.id, guest.id)}
-                              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-white text-lg font-semibold text-rose-700 transition hover:border-rose-400"
-                              aria-label="Remove guest"
-                            >
-                              −
-                            </button>
-                          </div>
-                          <div className="mt-2 grid grid-cols-2 gap-2">
-                            <label className={mobileFieldLabelClass}>
-                              RSVP
-                              <select
-                                value={guest.rsvpStatus}
-                                onChange={(event) => updateGuest(household.id, guest.id, { rsvpStatus: event.target.value })}
-                                className={selectClass}
-                                disabled={locked}
-                              >
-                                {rsvpOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className={mobileFieldLabelClass}>
-                              Dietary
-                              <select
-                                value={guest.dietary}
-                                onChange={(event) => updateGuest(household.id, guest.id, { dietary: event.target.value })}
-                                className={selectClass}
-                                disabled={locked}
-                              >
-                                {dietaryOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            {household.tischInvited && (
-                              <label className={`${mobileFieldLabelClass} col-span-2`}>
-                                Tisch RSVP
-                                <select
-                                  value={guest.tischRsvp}
-                                  onChange={(event) => updateGuest(household.id, guest.id, { tischRsvp: event.target.value })}
-                                  className={selectClass}
-                                  disabled={locked}
-                                >
-                                  {tischRsvpOptions
-                                    .filter((option) => option !== 'Not invited')
-                                    .map((option) => (
-                                      <option key={option} value={option}>
-                                        {option}
-                                      </option>
-                                    ))}
-                                </select>
-                              </label>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               )
             })}
