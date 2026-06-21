@@ -522,6 +522,9 @@ export default function GuestListManager() {
   const [expandedHouseholds, setExpandedHouseholds] = useState(() => applyExpandedPref(initialHouseholds, initialViewPrefs?.expanded))
   const expandedHouseholdsRef = useRef(expandedHouseholds)
   const [openMenuId, setOpenMenuId] = useState(null)
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches,
+  )
   const [remoteStatus, setRemoteStatus] = useState('idle')
   const [remoteError, setRemoteError] = useState('')
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -551,6 +554,15 @@ export default function GuestListManager() {
     } catch (error) {
       console.warn('Unable to read guest list auth flag', error)
     }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return () => {}
+    const mq = window.matchMedia('(max-width: 767px)')
+    const handler = (event) => setIsMobile(event.matches)
+    setIsMobile(mq.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
   }, [])
 
   useEffect(() => {
@@ -959,7 +971,20 @@ export default function GuestListManager() {
     const boolMatches = (value, filterValue) =>
       filterValue === 'any' ? true : filterValue === 'yes' ? Boolean(value) : !value
     const filtered = households.filter((household) => {
+      // Name search applies in both views.
       if (filters.envelopeName && !textIncludes(household.envelopeName, filters.envelopeName)) return false
+
+      // Apply only the filters each view actually exposes, so a value set in one
+      // view can't become a stuck, invisible filter in the other.
+      if (isMobile) {
+        if (filters.responseReceived !== 'any') {
+          const responded = hasResponded(household)
+          if (filters.responseReceived === 'received' && !responded) return false
+          if (filters.responseReceived === 'not' && responded) return false
+        }
+        return true
+      }
+
       if (filters.customSlug && !textIncludes(household.customSlug || household.slug, filters.customSlug)) return false
       if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
       if (!boolMatches(household.invitationSent, filters.invitationSent)) return false
@@ -968,11 +993,6 @@ export default function GuestListManager() {
       if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
       if (!boolMatches(household.tischInvited, filters.tischInvited)) return false
       if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
-      if (filters.responseReceived !== 'any') {
-        const responded = hasResponded(household)
-        if (filters.responseReceived === 'received' && !responded) return false
-        if (filters.responseReceived === 'not' && responded) return false
-      }
       if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
       if (filters.table && !textIncludes(household.table, filters.table)) return false
       if (filters.email && !textIncludes(household.email, filters.email)) return false
@@ -1013,7 +1033,7 @@ export default function GuestListManager() {
     })
 
     return sorted
-  }, [filters, households, sortConfig])
+  }, [filters, households, sortConfig, isMobile])
 
   const seatingTables = useMemo(() => {
     const tableMap = new Map()
