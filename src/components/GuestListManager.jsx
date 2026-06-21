@@ -199,6 +199,8 @@ const toggleableColumnLabels = {
   plusOneAccepted: '+1 accepted',
   tischInvited: 'Tisch invited',
   rsvpStatus: 'RSVP',
+  ceremonyRsvp: 'Ceremony',
+  receptionRsvp: 'Reception',
   dietaryRestrictions: 'Dietary',
   table: 'Table',
   email: 'Email',
@@ -249,6 +251,40 @@ const tischStateFor = (tischRsvp, invited) => {
 const hasResponded = (household) =>
   Boolean(household?.rsvpLocked) ||
   (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response')
+
+// Per-event status filter values map to the same states the badges use.
+const eventStatusFilterOptions = [
+  { value: 'all', label: 'All' },
+  { value: 'yes', label: 'Attending' },
+  { value: 'no', label: 'Not attending' },
+  { value: 'awaiting', label: 'Awaiting' },
+]
+// The guest-level state for a given event ('yes' | 'no' | 'awaiting' | 'na').
+const guestEventState = (household, guest, eventKey) => {
+  if (eventKey === 'ceremonyRsvp') return ceremonyStateFor(normalizeRsvpStatus(guest.rsvpStatus))
+  if (eventKey === 'receptionRsvp') return receptionStateFor(normalizeRsvpStatus(guest.rsvpStatus))
+  return tischStateFor(guest.tischRsvp, household.tischInvited)
+}
+// A compact summary badge for a household row: how many guests are attending a
+// given event, coloured by whether that's all, none, or some of them.
+const eventSummaryBadge = (household, eventKey) => {
+  const guests = household.guests || []
+  if (eventKey === 'tischRsvp' && !household.tischInvited) {
+    return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  }
+  if (guests.length === 0) return { label: '—', className: 'bg-charcoal/5 text-charcoal/40' }
+  const states = guests.map((guest) => guestEventState(household, guest, eventKey))
+  const applicable = states.filter((state) => state !== 'na')
+  if (applicable.length === 0) return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
+  const yes = applicable.filter((state) => state === 'yes').length
+  const label = `${yes}/${applicable.length}`
+  if (yes === applicable.length) return { label, className: 'bg-sage text-white' }
+  if (yes === 0) {
+    const allAwaiting = applicable.every((state) => state === 'awaiting')
+    return { label, className: allAwaiting ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-700' }
+  }
+  return { label, className: 'bg-amber-100 text-amber-800' }
+}
 const animationStyles = `
 @keyframes guestRowFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
@@ -271,6 +307,9 @@ const createDefaultFilters = () => ({
   tischInvited: 'any',
   rsvpStatus: 'all',
   responseReceived: 'any',
+  ceremonyStatus: 'all',
+  receptionStatus: 'all',
+  tischStatus: 'all',
   dietaryRestrictions: '',
   table: '',
   email: '',
@@ -301,6 +340,10 @@ const sanitizeViewPrefs = (prefs) => {
   if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
   if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
   if (!['any', 'received', 'not'].includes(filters.responseReceived)) filters.responseReceived = 'any'
+  const eventStatusValues = ['all', 'yes', 'no', 'awaiting']
+  if (!eventStatusValues.includes(filters.ceremonyStatus)) filters.ceremonyStatus = 'all'
+  if (!eventStatusValues.includes(filters.receptionStatus)) filters.receptionStatus = 'all'
+  if (!eventStatusValues.includes(filters.tischStatus)) filters.tischStatus = 'all'
 
   const expandedRaw = prefs.expanded && typeof prefs.expanded === 'object' ? prefs.expanded : null
   const expandedMode = expandedRaw?.mode === 'none' ? 'none' : expandedRaw?.mode === 'all' ? 'all' : null
@@ -992,7 +1035,17 @@ export default function GuestListManager() {
       if (!boolMatches(household.plusOneAllowed, filters.plusOneAllowed)) return false
       if (!boolMatches(household.plusOneAccepted, filters.plusOneAccepted)) return false
       if (!boolMatches(household.tischInvited, filters.tischInvited)) return false
-      if (filters.rsvpStatus !== 'all' && household.rsvpStatus !== filters.rsvpStatus) return false
+      if (filters.responseReceived !== 'any') {
+        const responded = hasResponded(household)
+        if (filters.responseReceived === 'received' && !responded) return false
+        if (filters.responseReceived === 'not' && responded) return false
+      }
+      const eventMatches = (eventKey, filterValue) =>
+        filterValue === 'all' ||
+        (household.guests || []).some((guest) => guestEventState(household, guest, eventKey) === filterValue)
+      if (!eventMatches('ceremonyRsvp', filters.ceremonyStatus)) return false
+      if (!eventMatches('receptionRsvp', filters.receptionStatus)) return false
+      if (!eventMatches('tischRsvp', filters.tischStatus)) return false
       if (filters.dietaryRestrictions && !textIncludes(household.dietaryRestrictions, filters.dietaryRestrictions)) return false
       if (filters.table && !textIncludes(household.table, filters.table)) return false
       if (filters.email && !textIncludes(household.email, filters.email)) return false
@@ -1610,7 +1663,7 @@ export default function GuestListManager() {
           </div>
         </div>
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-[2270px] divide-y divide-sage/20 text-sm">
+          <table className="min-w-[2510px] divide-y divide-sage/20 text-sm">
             <thead className="bg-sage/10 text-left text-sage-dark">
               <tr className="text-sm font-semibold">
                 <th className="sticky left-0 z-40 px-3 py-2 w-[260px] min-w-[240px] bg-white shadow-[2px_0_0_rgba(0,0,0,0.08)]">
@@ -1681,6 +1734,16 @@ export default function GuestListManager() {
                       <span>RSVP</span>
                       {renderSortIcon('rsvpStatus')}
                     </button>
+                  </th>
+                )}
+                {isColumnVisible('ceremonyRsvp') && (
+                  <th className="px-3 py-2 w-[120px]">
+                    <span>Ceremony</span>
+                  </th>
+                )}
+                {isColumnVisible('receptionRsvp') && (
+                  <th className="px-3 py-2 w-[120px]">
+                    <span>Reception</span>
                   </th>
                 )}
                 {isColumnVisible('dietaryRestrictions') && (
@@ -1818,28 +1881,68 @@ export default function GuestListManager() {
                 )}
                 {isColumnVisible('tischInvited') && (
                   <th className="px-3 pb-2 w-[170px]">
-                    <select
-                      value={filters.tischInvited}
-                      onChange={(event) => handleFilterChange('tischInvited', event.target.value)}
-                      className={filterInputClass}
-                    >
-                      <option value="any">Any</option>
-                      <option value="yes">Invited</option>
-                      <option value="no">Not invited</option>
-                    </select>
+                    <div className="space-y-1">
+                      <select
+                        value={filters.tischInvited}
+                        onChange={(event) => handleFilterChange('tischInvited', event.target.value)}
+                        className={filterInputClass}
+                      >
+                        <option value="any">Any (invited?)</option>
+                        <option value="yes">Invited</option>
+                        <option value="no">Not invited</option>
+                      </select>
+                      <select
+                        value={filters.tischStatus}
+                        onChange={(event) => handleFilterChange('tischStatus', event.target.value)}
+                        className={filterInputClass}
+                      >
+                        {eventStatusFilterOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.value === 'all' ? 'Any status' : option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </th>
                 )}
                 {isColumnVisible('rsvpStatus') && (
                   <th className="px-3 pb-2 w-[190px]">
                     <select
-                      value={filters.rsvpStatus}
-                      onChange={(event) => handleFilterChange('rsvpStatus', event.target.value)}
+                      value={filters.responseReceived}
+                      onChange={(event) => handleFilterChange('responseReceived', event.target.value)}
                       className={filterInputClass}
                     >
-                      <option value="all">All</option>
-                      {rsvpOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
+                      <option value="any">Any response</option>
+                      <option value="received">Received</option>
+                      <option value="not">Not received</option>
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('ceremonyRsvp') && (
+                  <th className="px-3 pb-2 w-[120px]">
+                    <select
+                      value={filters.ceremonyStatus}
+                      onChange={(event) => handleFilterChange('ceremonyStatus', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      {eventStatusFilterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </th>
+                )}
+                {isColumnVisible('receptionRsvp') && (
+                  <th className="px-3 pb-2 w-[120px]">
+                    <select
+                      value={filters.receptionStatus}
+                      onChange={(event) => handleFilterChange('receptionStatus', event.target.value)}
+                      className={filterInputClass}
+                    >
+                      {eventStatusFilterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>
@@ -2076,6 +2179,26 @@ export default function GuestListManager() {
                           </select>
                         </td>
                       )}
+                      {isColumnVisible('ceremonyRsvp') && (
+                        <td className="px-3 py-2 w-[120px] text-center">
+                          {(() => {
+                            const badge = eventSummaryBadge(household, 'ceremonyRsvp')
+                            return (
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                            )
+                          })()}
+                        </td>
+                      )}
+                      {isColumnVisible('receptionRsvp') && (
+                        <td className="px-3 py-2 w-[120px] text-center">
+                          {(() => {
+                            const badge = eventSummaryBadge(household, 'receptionRsvp')
+                            return (
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                            )
+                          })()}
+                        </td>
+                      )}
                       {isColumnVisible('dietaryRestrictions') && (
                         <td className="px-3 py-2 w-[190px]">
                           <select
@@ -2237,6 +2360,26 @@ export default function GuestListManager() {
                                   </option>
                                 ))}
                               </select>
+                            </td>
+                          )}
+                          {isColumnVisible('ceremonyRsvp') && (
+                            <td className="px-3 py-2 w-[120px] text-center">
+                              {(() => {
+                                const badge = eventRsvpBadge(ceremonyStateFor(normalizeRsvpStatus(guest.rsvpStatus)))
+                                return (
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                                )
+                              })()}
+                            </td>
+                          )}
+                          {isColumnVisible('receptionRsvp') && (
+                            <td className="px-3 py-2 w-[120px] text-center">
+                              {(() => {
+                                const badge = eventRsvpBadge(receptionStateFor(normalizeRsvpStatus(guest.rsvpStatus)))
+                                return (
+                                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                                )
+                              })()}
                             </td>
                           )}
                           {isColumnVisible('dietaryRestrictions') && (
