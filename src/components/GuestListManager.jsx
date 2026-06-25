@@ -186,6 +186,14 @@ const seedHouseholds = [
 ]
 
 const rsvpOptions = ['Awaiting response', 'Both events', 'Ceremony only', 'Reception only', 'Not attending']
+// The per-guest RSVP only governs the ceremony + reception. The Tisch is a
+// separate event tracked in `tischRsvp`, so 'Both events' is displayed as
+// 'Ceremony + Reception' to avoid implying it covers the Tisch too. The stored
+// value stays 'Both events' so existing data and normalization are unaffected.
+const rsvpStatusLabels = {
+  'Both events': 'Ceremony + Reception',
+}
+const rsvpStatusLabel = (status) => rsvpStatusLabels[status] || status
 const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
 const invitedByOptions = ['Bride', 'Groom', 'Both']
 const tischRsvpOptions = ['Awaiting response', 'Attending', 'Not attending', 'Not invited']
@@ -257,6 +265,31 @@ const eventSummaryBadge = (household, eventKey) => {
   if (yes === 0 && no > 0 && awaiting === 0) return { label, className: 'bg-rose-100 text-rose-700' }
   return { label, className: 'bg-amber-100 text-amber-800' }
 }
+
+// The three real events, in order. Per-event fractions (attending / total) are
+// the source of truth for attendance everywhere in the manager.
+const SUMMARY_EVENTS = [
+  { key: 'ceremonyRsvp', label: 'Ceremony' },
+  { key: 'receptionRsvp', label: 'Reception' },
+  { key: 'tischRsvp', label: 'Tisch' },
+]
+
+// Compact row of Ceremony / Reception / Tisch fraction badges for a household
+// (or a history snapshot's household). Tisch shows "n/a" when the household was
+// not Tisch-invited, which is exactly what distinguishes backup snapshots.
+const EventFractionRow = ({ household, className = '' }) => (
+  <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${className}`}>
+    {SUMMARY_EVENTS.map(({ key, label }) => {
+      const badge = eventSummaryBadge(household, key)
+      return (
+        <span key={key} className="inline-flex items-center gap-1 text-[0.7rem] font-semibold text-sage-dark/70">
+          {label}
+          <span className={`rounded-full px-2 py-0.5 ${badge.className}`}>{badge.label}</span>
+        </span>
+      )
+    })}
+  </div>
+)
 
 const animationStyles = `
 @keyframes guestRowFadeIn {
@@ -381,7 +414,7 @@ const formatHistoryTimestamp = (value) => {
 const summarizeSnapshotGuests = (household) => {
   const guests = Array.isArray(household?.guests) ? household.guests : []
   return guests.map((guest) => {
-    const rsvp = normalizeRsvpStatus(guest?.rsvpStatus)
+    const rsvp = rsvpStatusLabel(normalizeRsvpStatus(guest?.rsvpStatus))
     const tisch = normalizeTischRsvp(guest?.tischRsvp, household?.tischInvited)
     const parts = [rsvp]
     if (household?.tischInvited && tisch !== 'Not invited') {
@@ -1569,6 +1602,12 @@ export default function GuestListManager() {
               </div>
 
               <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+                <section className="space-y-2 rounded-xl border border-sage/20 bg-sage/5 px-3 py-3">
+                  <p className="text-[0.7rem] font-semibold uppercase tracking-normal text-sage-dark/70">Attendance</p>
+                  <EventFractionRow household={selectedHousehold} />
+                  <p className="text-[0.7rem] text-charcoal/50">Attending / total per event. Tisch shows n/a unless the household is Tisch invited.</p>
+                </section>
+
                 <section className="space-y-3">
                   <p className="text-sm font-semibold text-sage-dark">Household details</p>
                   <label className={mobileFieldLabelClass}>
@@ -1815,7 +1854,7 @@ export default function GuestListManager() {
                         </div>
                         <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <label className={mobileFieldLabelClass}>
-                            RSVP
+                            RSVP (ceremony + reception)
                             <select
                               value={guest.rsvpStatus}
                               onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { rsvpStatus: event.target.value })}
@@ -1824,7 +1863,7 @@ export default function GuestListManager() {
                             >
                               {rsvpOptions.map((option) => (
                                 <option key={option} value={option}>
-                                  {option}
+                                  {rsvpStatusLabel(option)}
                                 </option>
                               ))}
                             </select>
@@ -1944,6 +1983,7 @@ export default function GuestListManager() {
                                   Restore
                                 </button>
                               </div>
+                              {entry.household && <EventFractionRow household={entry.household} className="mt-2" />}
                               {guestSummary.length > 0 ? (
                                 <ul className="mt-2 space-y-1">
                                   {guestSummary.map((guest) => (
