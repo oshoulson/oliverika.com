@@ -60,6 +60,61 @@ const getJsonObject = async (key) => {
   }
 }
 
+// Newest-first history snapshots for a single household id. Used by the
+// recovery UI so an accidental edit/deletion can be reviewed and restored.
+const MAX_HISTORY_ENTRIES = 100
+const listHistorySnapshots = async (id) => {
+  const prefix = `${HISTORY_PREFIX}${encodeURIComponent(String(id))}/`
+  const objects = []
+  let continuationToken = undefined
+
+  while (true) {
+    const response = await getS3Client().send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      }),
+    )
+    const contents = Array.isArray(response.Contents) ? response.Contents : []
+    contents.forEach((entry) => {
+      const key = entry?.Key
+      if (typeof key === 'string' && key.endsWith('.json')) {
+        objects.push({ key, lastModified: entry.LastModified || null })
+      }
+    })
+    if (!response.IsTruncated) break
+    continuationToken = response.NextContinuationToken
+  }
+
+  // Newest first; fall back to the timestamp embedded in the key when S3 omits LastModified.
+  objects.sort((a, b) => {
+    const aTime = a.lastModified ? new Date(a.lastModified).getTime() : 0
+    const bTime = b.lastModified ? new Date(b.lastModified).getTime() : 0
+    if (aTime !== bTime) return bTime - aTime
+    return b.key.localeCompare(a.key)
+  })
+
+  const limited = objects.slice(0, MAX_HISTORY_ENTRIES)
+  const entries = await mapLimit(limited, 10, async ({ key }) => {
+    try {
+      const snapshot = await getJsonObject(key)
+      if (!snapshot || typeof snapshot !== 'object') return null
+      return {
+        key,
+        recordedAt: snapshot.recordedAt || null,
+        action: snapshot.action || null,
+        household: snapshot.household ?? null,
+      }
+    } catch (error) {
+      console.error('guest-list history read error', { key, error })
+      return null
+    }
+  })
+
+  return entries.filter(Boolean)
+}
+
 const listHouseholdObjects = async () => {
   const keys = []
   let continuationToken = undefined
@@ -131,7 +186,31 @@ const writeHistorySnapshot = async (client, { id, action, household }) => {
   }
 }
 
-const handleGet = async () => {
+const handleGetHistory = async (id) => {
+  if (!BUCKET) {
+    return bad(500, 'Missing S3 bucket configuration')
+  }
+  if (!id || !String(id).trim()) {
+    return bad(400, 'Missing household id')
+  }
+  try {
+    const history = await listHistorySnapshots(String(id).trim())
+    return ok({ id: String(id).trim(), history })
+  } catch (error) {
+    console.error('guest-list history list error', error)
+    const status = error?.$metadata?.httpStatusCode || 500
+    return bad(status === 403 ? 403 : 500, 'Unable to load household history', {
+      detail: error?.message || null,
+      code: error?.name || null,
+    })
+  }
+}
+
+const handleGet = async (event) => {
+  const historyId = event?.queryStringParameters?.history
+  if (historyId) {
+    return handleGetHistory(historyId)
+  }
   if (!BUCKET) {
     return bad(500, 'Missing S3 bucket configuration')
   }
@@ -319,7 +398,7 @@ export async function handler(event) {
   }
 
   if (event.httpMethod === 'GET') {
-    return handleGet()
+    return handleGet(event)
   }
 
   if (event.httpMethod === 'POST') {

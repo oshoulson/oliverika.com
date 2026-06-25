@@ -359,6 +359,42 @@ const persistViewPrefs = (prefs) => {
   }
 }
 
+const formatHistoryTimestamp = (value) => {
+  if (!value) return 'Unknown time'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  try {
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return date.toISOString()
+  }
+}
+
+// Compact per-guest summary for a history snapshot, so the recovery list shows
+// what each version would restore (main RSVP + Tisch response) at a glance.
+const summarizeSnapshotGuests = (household) => {
+  const guests = Array.isArray(household?.guests) ? household.guests : []
+  return guests.map((guest) => {
+    const rsvp = normalizeRsvpStatus(guest?.rsvpStatus)
+    const tisch = normalizeTischRsvp(guest?.tischRsvp, household?.tischInvited)
+    const parts = [rsvp]
+    if (household?.tischInvited && tisch !== 'Not invited') {
+      parts.push(`Tisch: ${tisch}`)
+    }
+    return {
+      id: guest?.id || guest?.name || Math.random().toString(16).slice(2),
+      name: guest?.name || 'Guest',
+      detail: parts.join(' · '),
+    }
+  })
+}
+
 const toYesNo = (value) => (value ? 'Yes' : 'No')
 const formatAddress = (address = {}) => {
   const parts = [address.line1, address.city, address.state, address.postalCode, address.country].filter(Boolean)
@@ -476,6 +512,8 @@ export default function GuestListManager() {
   const [showSeatingView, setShowSeatingView] = useState(Boolean(initialViewPrefs?.showSeatingView))
   const [filters, setFilters] = useState(() => ({ ...createDefaultFilters(), ...(initialViewPrefs?.filters || {}) }))
   const [selectedHouseholdId, setSelectedHouseholdId] = useState(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyState, setHistoryState] = useState({ status: 'idle', error: '', entries: [], householdId: null })
   const saveTimer = useRef(null)
   const viewPrefsTimer = useRef(null)
   const isSavingRef = useRef(false)
@@ -732,10 +770,26 @@ export default function GuestListManager() {
         if (typeof updates.tischInvited !== 'undefined') {
           const invited = Boolean(updates.tischInvited)
           next.tischInvited = invited
-          next.guests = (next.guests || []).map((guest) => ({
-            ...guest,
-            tischRsvp: normalizeTischRsvp(guest.tischRsvp, invited),
-          }))
+          next.guests = (next.guests || []).map((guest) => {
+            if (!invited) {
+              // Turning the Tisch invite off would otherwise overwrite each guest's
+              // response with 'Not invited'. Stash the prior response first so a later
+              // re-enable can restore it instead of silently resetting to awaiting.
+              const hadResponse = ['Attending', 'Not attending', 'Awaiting response'].includes(guest.tischRsvp)
+              return {
+                ...guest,
+                tischRsvpPrev: hadResponse ? guest.tischRsvp : guest.tischRsvpPrev,
+                tischRsvp: 'Not invited',
+              }
+            }
+            // Re-enabling: restore the stashed response when we have one.
+            const restored =
+              guest.tischRsvpPrev && ['Attending', 'Not attending', 'Awaiting response'].includes(guest.tischRsvpPrev)
+                ? guest.tischRsvpPrev
+                : normalizeTischRsvp(guest.tischRsvp, true)
+            const { tischRsvpPrev: _stashed, ...rest } = guest
+            return { ...rest, tischRsvp: restored }
+          })
         }
         return next
       }),
@@ -807,6 +861,42 @@ export default function GuestListManager() {
         return { ...household, guests: remaining.length > 0 ? remaining : household.guests }
       }),
     )
+    markHouseholdUpsert(householdId)
+  }
+
+  // Reset the recovery panel whenever a different household is opened.
+  useEffect(() => {
+    setHistoryOpen(false)
+    setHistoryState({ status: 'idle', error: '', entries: [], householdId: null })
+  }, [selectedHouseholdId])
+
+  const loadHistory = async (householdId) => {
+    if (!householdId) return
+    setHistoryOpen(true)
+    setHistoryState({ status: 'loading', error: '', entries: [], householdId })
+    try {
+      const response = await fetch(`${FUNCTIONS_BASE}/guest-list?history=${encodeURIComponent(householdId)}`)
+      if (!response.ok) {
+        throw new Error('Unable to load history')
+      }
+      const data = await response.json()
+      const entries = Array.isArray(data.history) ? data.history : []
+      setHistoryState({ status: 'ready', error: '', entries, householdId })
+    } catch (error) {
+      console.error('load history error', error)
+      setHistoryState({
+        status: 'error',
+        error: 'Unable to load backup history from the server.',
+        entries: [],
+        householdId,
+      })
+    }
+  }
+
+  const restoreSnapshot = (householdId, snapshotHousehold) => {
+    if (!householdId || !snapshotHousehold || typeof snapshotHousehold !== 'object') return
+    const restored = ensureDerivedFields({ ...snapshotHousehold, id: householdId })
+    setHouseholds((prev) => prev.map((household) => (household.id === householdId ? restored : household)))
     markHouseholdUpsert(householdId)
   }
 
@@ -1789,6 +1879,88 @@ export default function GuestListManager() {
                       placeholder="Any notes for this household"
                     />
                   </label>
+                </section>
+
+                <section className="space-y-3 border-t border-sage/20 pt-5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-sage-dark">Backup history</p>
+                      <p className="text-xs text-charcoal/60">
+                        Restore an earlier RSVP if an edit was made by mistake.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        historyOpen && historyState.householdId === selectedHousehold.id
+                          ? setHistoryOpen(false)
+                          : loadHistory(selectedHousehold.id)
+                      }
+                      className="shrink-0 rounded-full border border-sage/40 px-3 py-1.5 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                    >
+                      {historyOpen && historyState.householdId === selectedHousehold.id ? 'Hide history' : 'View history'}
+                    </button>
+                  </div>
+
+                  {historyOpen && historyState.householdId === selectedHousehold.id && (
+                    <div className="space-y-2">
+                      {historyState.status === 'loading' && (
+                        <p className="text-xs text-charcoal/60">Loading backups…</p>
+                      )}
+                      {historyState.status === 'error' && (
+                        <p className="text-xs font-semibold text-rose-700">{historyState.error}</p>
+                      )}
+                      {historyState.status === 'ready' && historyState.entries.length === 0 && (
+                        <p className="text-xs text-charcoal/60">No backups found for this household yet.</p>
+                      )}
+                      {historyState.status === 'ready' &&
+                        historyState.entries.map((entry) => {
+                          const guestSummary = summarizeSnapshotGuests(entry.household)
+                          const isDelete = entry.action === 'delete'
+                          return (
+                            <div
+                              key={entry.key}
+                              className="rounded-xl border border-sage/20 bg-sage/5 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-sage-dark">
+                                    {formatHistoryTimestamp(entry.recordedAt)}
+                                  </p>
+                                  <span
+                                    className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${
+                                      isDelete ? 'bg-rose-100 text-rose-700' : 'bg-sage/15 text-sage-dark/80'
+                                    }`}
+                                  >
+                                    {isDelete ? 'Before deletion' : 'Saved edit'}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => restoreSnapshot(selectedHousehold.id, entry.household)}
+                                  disabled={!entry.household}
+                                  className="shrink-0 rounded-full bg-sage px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Restore
+                                </button>
+                              </div>
+                              {guestSummary.length > 0 ? (
+                                <ul className="mt-2 space-y-1">
+                                  {guestSummary.map((guest) => (
+                                    <li key={guest.id} className="text-xs text-charcoal/70">
+                                      <span className="font-semibold text-charcoal/80">{guest.name}</span>
+                                      {guest.detail ? ` — ${guest.detail}` : ''}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="mt-2 text-xs text-charcoal/50">No guest details in this backup.</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                    </div>
+                  )}
                 </section>
               </div>
             </div>
