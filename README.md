@@ -48,7 +48,9 @@ The `/.netlify/functions/submit-rsvp` function appends every submission to a Goo
 - The guest list manager and the household RSVP form both read/write through `/.netlify/functions/guest-list`, which stores each household as a JSON object in S3 under `guest-list/households/<id>.json` (with an `guest-list/index.json` manifest).
 - **Append-only history**: every save (RSVP submission or manager edit) and every deletion also writes an immutable, timestamped snapshot under `guest-list/history/<id>/<timestamp>-<uuid>.json`. These objects are never overwritten or deleted by the app, so a household can be recovered after an accidental edit or removal. Deletions snapshot the household's last known state before it is removed.
 - History writes are best-effort: if a snapshot fails it is logged but never blocks the primary save, so RSVPs always go through.
-- To recover, list the history objects for the affected household id and re-`POST` the desired snapshot's `household` back through the `guest-list` function as an `upserts` entry.
+- **Self-service recovery**: open the guest manager, click a household, scroll to **Backup history**, and hit **View history**. Each timestamped snapshot shows what RSVP (and Tisch response) it would restore; **Restore** writes that version back as a normal upsert (which itself snapshots the current state first, so a restore is also reversible). Under the hood this calls `GET /.netlify/functions/guest-list?history=<householdId>`.
+- Manual fallback: you can still `GET .../guest-list?history=<id>`, pick a snapshot's `household`, and re-`POST` it through the `guest-list` function as an `upserts` entry.
+- **Tisch toggle safety**: toggling **Tisch invited** off no longer destroys each guest's Tisch response—the prior answer is stashed and restored if Tisch is re-enabled, so an accidental deselect/reselect won't reset a guest to "Awaiting response".
 
 ## Available scripts
 
