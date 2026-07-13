@@ -203,6 +203,33 @@ const eventStatusFilterOptions = [
   { value: 'no', label: 'Not attending' },
   { value: 'awaiting', label: 'Awaiting' },
 ]
+const sortOptions = [
+  { value: 'nameAsc', label: 'Household (A–Z)' },
+  { value: 'nameDesc', label: 'Household (Z–A)' },
+  { value: 'recent', label: 'RSVP: most recent first' },
+  { value: 'oldest', label: 'RSVP: least recent first' },
+]
+const defaultSortBy = 'nameAsc'
+const compareHouseholdNames = (a, b) =>
+  String(a.envelopeName || '').toLowerCase().localeCompare(String(b.envelopeName || '').toLowerCase())
+// Households that haven't RSVP'd yet have no rsvpRespondedAt timestamp; they're
+// pushed to the end of either RSVP-date sort (name-ordered) rather than being
+// treated as "oldest" or "most recent".
+const compareByRespondedAt = (a, b, mostRecentFirst) => {
+  const aTime = a.rsvpRespondedAt ? new Date(a.rsvpRespondedAt).getTime() : null
+  const bTime = b.rsvpRespondedAt ? new Date(b.rsvpRespondedAt).getTime() : null
+  if (aTime === null && bTime === null) return compareHouseholdNames(a, b)
+  if (aTime === null) return 1
+  if (bTime === null) return -1
+  if (aTime === bTime) return compareHouseholdNames(a, b)
+  return mostRecentFirst ? bTime - aTime : aTime - bTime
+}
+const sortComparators = {
+  nameAsc: compareHouseholdNames,
+  nameDesc: (a, b) => compareHouseholdNames(b, a),
+  recent: (a, b) => compareByRespondedAt(a, b, true),
+  oldest: (a, b) => compareByRespondedAt(a, b, false),
+}
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
 const selectClass =
@@ -351,6 +378,7 @@ const sanitizeViewPrefs = (prefs) => {
   return {
     filters,
     showSeatingView: typeof prefs.showSeatingView === 'boolean' ? prefs.showSeatingView : null,
+    sortBy: sortOptions.some((option) => option.value === prefs.sortBy) ? prefs.sortBy : defaultSortBy,
   }
 }
 
@@ -453,6 +481,7 @@ const blankHousehold = () => ({
   dietaryRestrictions: 'None',
   notes: '',
   rsvpLocked: false,
+  rsvpRespondedAt: null,
   guests: [
     {
       id: createId('guest'),
@@ -544,6 +573,7 @@ export default function GuestListManager() {
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [showSeatingView, setShowSeatingView] = useState(Boolean(initialViewPrefs?.showSeatingView))
   const [filters, setFilters] = useState(() => ({ ...createDefaultFilters(), ...(initialViewPrefs?.filters || {}) }))
+  const [sortBy, setSortBy] = useState(initialViewPrefs?.sortBy || defaultSortBy)
   const [selectedHouseholdId, setSelectedHouseholdId] = useState(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyState, setHistoryState] = useState({ status: 'idle', error: '', entries: [], householdId: null })
@@ -586,7 +616,7 @@ export default function GuestListManager() {
     }
 
     viewPrefsTimer.current = setTimeout(() => {
-      persistViewPrefs({ filters, showSeatingView })
+      persistViewPrefs({ filters, showSeatingView, sortBy })
     }, 200)
 
     return () => {
@@ -594,7 +624,7 @@ export default function GuestListManager() {
         clearTimeout(viewPrefsTimer.current)
       }
     }
-  }, [filters, showSeatingView])
+  }, [filters, showSeatingView, sortBy])
 
   useEffect(() => {
     let cancelled = false
@@ -957,10 +987,9 @@ export default function GuestListManager() {
       return true
     })
 
-    return [...filtered].sort((a, b) =>
-      String(a.envelopeName || '').toLowerCase().localeCompare(String(b.envelopeName || '').toLowerCase()),
-    )
-  }, [filters, households])
+    const comparator = sortComparators[sortBy] || sortComparators[defaultSortBy]
+    return [...filtered].sort(comparator)
+  }, [filters, households, sortBy])
 
   const seatingTables = useMemo(() => {
     const tableMap = new Map()
@@ -1442,7 +1471,21 @@ export default function GuestListManager() {
               </select>
             </label>
           </div>
-          <div className="flex flex-wrap gap-2 lg:justify-end">
+          <div className="flex flex-wrap items-end gap-2 lg:justify-end">
+            <label className={mobileFieldLabelClass}>
+              Sort by
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                className={selectClass}
+              >
+                {sortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               onClick={resetFilters}

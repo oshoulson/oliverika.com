@@ -305,6 +305,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       notes: targetNotes,
       rsvpStatus,
       rsvpLocked: true,
+      rsvpRespondedAt: new Date().toISOString(),
     }
 
     try {
