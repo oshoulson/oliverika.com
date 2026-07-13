@@ -60,6 +60,38 @@ const getJsonObject = async (key) => {
   }
 }
 
+// Same as getJsonObject, but also returns the object's S3 LastModified so
+// callers can backfill a "when was this last touched" timestamp for records
+// saved before that field existed on the record itself.
+const getJsonObjectWithMeta = async (key) => {
+  try {
+    const response = await getS3Client().send(
+      new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+      }),
+    )
+    const text = await streamToString(response.Body)
+    return { value: JSON.parse(text || 'null'), lastModified: response.LastModified || null }
+  } catch (error) {
+    const status = error?.$metadata?.httpStatusCode || 500
+    if (status === 404) return { value: null, lastModified: null }
+    throw error
+  }
+}
+
+// Mirrors GuestListManager.jsx's hasResponded() so legacy households (saved
+// before rsvpRespondedAt existed) can still be placed correctly in the RSVP
+// recency sort.
+const hasRespondedServer = (household) => {
+  if (household?.rsvpLocked) return true
+  const guests = Array.isArray(household?.guests) ? household.guests : []
+  return guests.some((guest) => {
+    const status = String(guest?.rsvpStatus || '').trim()
+    return status && !['Awaiting response', 'Not offered', 'Tentative', ''].includes(status)
+  })
+}
+
 // Newest-first history snapshots for a single household id. Used by the
 // recovery UI so an accidental edit/deletion can be reviewed and restored.
 const MAX_HISTORY_ENTRIES = 100
@@ -220,7 +252,11 @@ const handleGet = async (event) => {
     if (householdIds && householdIds.length > 0) {
       const entries = await mapLimit(householdIds, 10, async (id) => {
         try {
-          return await getJsonObject(householdKeyForId(id))
+          const { value, lastModified } = await getJsonObjectWithMeta(householdKeyForId(id))
+          if (value && typeof value === 'object' && !value.rsvpRespondedAt && lastModified && hasRespondedServer(value)) {
+            value.rsvpRespondedAt = lastModified.toISOString()
+          }
+          return value
         } catch (error) {
           console.error('guest-list household get error', { id, error })
           return null
