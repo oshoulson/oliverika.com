@@ -734,6 +734,8 @@ export default function GuestListManager() {
     let guestCount = 0
     let maxInvited = 0
     let acceptedGuests = 0
+    let declinedGuests = 0
+    let awaitingGuests = 0
     let awaitingInvites = 0
     const maxBreakdown = { Bride: 0, Groom: 0, Both: 0, Other: 0 }
 
@@ -753,18 +755,28 @@ export default function GuestListManager() {
         awaitingInvites += 1
       }
 
+      // Sort every invited seat into exactly one RSVP bucket — each named guest,
+      // plus any allowed-but-unfilled +1 slot (counted as accepted only when the
+      // +1 is accepted, mirroring maxInvited). This guarantees
+      // acceptedGuests + declinedGuests + awaitingGuests === maxInvited, so the
+      // guest-count cards always reconcile to the Max invited total.
       household.guests.forEach((guest) => {
         if (['Both events', 'Ceremony only', 'Reception only'].includes(guest.rsvpStatus)) {
           acceptedGuests += 1
+        } else if (guest.rsvpStatus === 'Not attending') {
+          declinedGuests += 1
+        } else {
+          awaitingGuests += 1
         }
       })
 
-      if (household.plusOneAllowed && household.plusOneAccepted) {
-        acceptedGuests += 1
+      if (plusOneSlot) {
+        if (household.plusOneAccepted) acceptedGuests += 1
+        else awaitingGuests += 1
       }
     })
 
-    return { invitations, guestCount, maxInvited, acceptedGuests, awaitingInvites, maxBreakdown }
+    return { invitations, guestCount, maxInvited, acceptedGuests, declinedGuests, awaitingGuests, awaitingInvites, maxBreakdown }
   }, [households])
 
   const selectedHousehold = useMemo(
@@ -1364,11 +1376,17 @@ export default function GuestListManager() {
       </div>
     </div>
 
+      {/*
+        Top row is the guest headcount and its RSVP breakdown, which reconcile:
+        Accepted + Declined + Awaiting === Max invited. The bottom row tracks
+        households, a different unit — kept apart so the two aren't conflated.
+        Every card names its unit (Guests vs Households) in the sub-label.
+      */}
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-sage/30 bg-white/80 p-4 shadow-frame">
           <p className="text-sm font-semibold text-sage-dark/80">Max invited</p>
           <p className="mt-1 font-serif text-4xl text-sage-dark">{stats.maxInvited}</p>
-          <p className="text-sm text-charcoal/70">Guests incl. allowed +1s</p>
+          <p className="text-sm text-charcoal/70">Guests · incl. allowed +1s</p>
           <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-sage-dark/80">
             <span className="rounded-full bg-sage/15 px-2 py-1">Groom: {stats.maxBreakdown.Groom || 0}</span>
             <span className="rounded-full bg-sage/15 px-2 py-1">Bride: {stats.maxBreakdown.Bride || 0}</span>
@@ -1376,9 +1394,11 @@ export default function GuestListManager() {
           </div>
         </div>
         {[
-          { label: 'Invitations', value: stats.invitations, sub: 'Households / singletons' },
-          { label: 'Awaiting', value: stats.awaitingInvites, sub: 'Invites sent with no RSVP' },
-          { label: 'Accepted', value: stats.acceptedGuests, sub: 'Guests marked Accepted' },
+          { label: 'Accepted', value: stats.acceptedGuests, sub: 'Guests · coming' },
+          { label: 'Declined', value: stats.declinedGuests, sub: 'Guests · not coming' },
+          { label: 'Awaiting', value: stats.awaitingGuests, sub: 'Guests · no reply yet' },
+          { label: 'Invitations', value: stats.invitations, sub: 'Households · incl. singletons' },
+          { label: 'No reply', value: stats.awaitingInvites, sub: 'Households · invite sent, no RSVP' },
         ].map((item) => (
           <div key={item.label} className="rounded-2xl border border-sage/30 bg-white/80 p-4 shadow-frame">
             <p className="text-sm font-semibold text-sage-dark/80">{item.label}</p>
