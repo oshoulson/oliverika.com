@@ -284,6 +284,17 @@ const eventSummaryBadge = (household, eventKey) => {
     else if (state === 'no') no += 1
     else awaiting += 1
   })
+  // An allowed +1 with no named guest yet is still an invited seat (it's
+  // counted this way in the top-line stats), so fold it into the fraction
+  // too — otherwise these badges under-count relative to the totals.
+  const hasPlusOneGuest = guests.some((guest) => guest.type === 'plus-one')
+  const plusOneCountsHere =
+    eventKey === 'tischRsvp' ? Boolean(household?.tischInvited) : true
+  if (household?.plusOneAllowed && !hasPlusOneGuest && plusOneCountsHere) {
+    total += 1
+    if (household.plusOneAccepted) yes += 1
+    else awaiting += 1
+  }
   if (total === 0) {
     return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
   }
