@@ -256,6 +256,13 @@ const hasResponded = (household) =>
   Boolean(household?.rsvpLocked) ||
   (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response')
 
+// A household can be "responded" overall yet still have individual members who
+// haven't replied. This flags exactly those — on the board, but at least one
+// named guest is still "Awaiting response" — so partial replies don't hide.
+const hasAwaitingMembers = (household) =>
+  hasResponded(household) &&
+  (household?.guests || []).some((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Awaiting response')
+
 // Per-guest, per-event state used by the summary list badges.
 const guestEventState = (household, guest, eventKey) => {
   if (eventKey === 'tischRsvp') {
@@ -286,13 +293,17 @@ const eventSummaryBadge = (household, eventKey) => {
   })
   // An allowed +1 with no named guest yet is still an invited seat (it's
   // counted this way in the top-line stats), so fold it into the fraction
-  // too — otherwise these badges under-count relative to the totals.
+  // too — otherwise these badges under-count relative to the totals. Its
+  // state mirrors the top-line rule: accepted → attending; once the household
+  // has otherwise responded, an un-accepted +1 is a resolved "not attending";
+  // while the household is still silent it stays awaiting.
   const hasPlusOneGuest = guests.some((guest) => guest.type === 'plus-one')
   const plusOneCountsHere =
     eventKey === 'tischRsvp' ? Boolean(household?.tischInvited) : true
   if (household?.plusOneAllowed && !hasPlusOneGuest && plusOneCountsHere) {
     total += 1
     if (household.plusOneAccepted) yes += 1
+    else if (hasResponded(household)) no += 1
     else awaiting += 1
   }
   if (total === 0) {
@@ -381,7 +392,7 @@ const sanitizeViewPrefs = (prefs) => {
   if (!['any', 'yes', 'no'].includes(filters.plusOneAccepted)) filters.plusOneAccepted = 'any'
   if (!['any', 'yes', 'no'].includes(filters.tischInvited)) filters.tischInvited = 'any'
   if (!['all', ...rsvpOptions].includes(filters.rsvpStatus)) filters.rsvpStatus = 'all'
-  if (!['any', 'received', 'not'].includes(filters.responseReceived)) filters.responseReceived = 'any'
+  if (!['any', 'received', 'not', 'awaiting-members'].includes(filters.responseReceived)) filters.responseReceived = 'any'
   if (!eventStatusValues.includes(filters.ceremonyStatus)) filters.ceremonyStatus = 'all'
   if (!eventStatusValues.includes(filters.receptionStatus)) filters.receptionStatus = 'all'
   if (!eventStatusValues.includes(filters.tischStatus)) filters.tischStatus = 'all'
@@ -766,8 +777,7 @@ export default function GuestListManager() {
       }
 
       // Sort every invited seat into exactly one RSVP bucket — each named guest,
-      // plus any allowed-but-unfilled +1 slot (counted as accepted only when the
-      // +1 is accepted, mirroring maxInvited). This guarantees
+      // plus any allowed-but-unfilled +1 slot. This guarantees
       // acceptedGuests + declinedGuests + awaitingGuests === maxInvited.
       let householdDeclined = 0
       household.guests.forEach((guest) => {
@@ -781,9 +791,19 @@ export default function GuestListManager() {
         }
       })
 
+      // Allowed-but-unfilled +1 slot: accepted → a coming guest. Once the
+      // household has otherwise responded, an un-accepted +1 is treated as not
+      // coming (declined) so it ticks Max possible down instead of lingering in
+      // Awaiting; while the household is still silent the +1 stays awaiting.
       if (plusOneSlot) {
-        if (household.plusOneAccepted) acceptedGuests += 1
-        else awaitingGuests += 1
+        if (household.plusOneAccepted) {
+          acceptedGuests += 1
+        } else if (hasResponded(household)) {
+          declinedGuests += 1
+          householdDeclined += 1
+        } else {
+          awaitingGuests += 1
+        }
       }
 
       // "Max possible" is the invite ceiling minus anyone who has declined, so it
@@ -1016,6 +1036,7 @@ export default function GuestListManager() {
         const responded = hasResponded(household)
         if (filters.responseReceived === 'received' && !responded) return false
         if (filters.responseReceived === 'not' && responded) return false
+        if (filters.responseReceived === 'awaiting-members' && !hasAwaitingMembers(household)) return false
       }
 
       if (filters.invitedBy !== 'all' && household.invitedBy !== filters.invitedBy) return false
@@ -1460,6 +1481,7 @@ export default function GuestListManager() {
                 <option value="any">All households</option>
                 <option value="received">Received</option>
                 <option value="not">Not received</option>
+                <option value="awaiting-members">Partial replies</option>
               </select>
             </label>
             <label className={mobileFieldLabelClass}>
@@ -1592,9 +1614,12 @@ export default function GuestListManager() {
             const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
             const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
             const responded = hasResponded(household)
-            const responseBadge = responded
-              ? { label: 'Received', className: 'bg-sage text-white' }
-              : { label: 'Awaiting', className: 'bg-amber-100 text-amber-800' }
+            const awaitingMembers = hasAwaitingMembers(household)
+            const responseBadge = !responded
+              ? { label: 'Awaiting', className: 'bg-amber-100 text-amber-800' }
+              : awaitingMembers
+                ? { label: 'Partial', className: 'bg-amber-200 text-amber-900' }
+                : { label: 'Received', className: 'bg-sage text-white' }
             const ceremony = eventSummaryBadge(household, 'ceremonyRsvp')
             const reception = eventSummaryBadge(household, 'receptionRsvp')
             const tisch = eventSummaryBadge(household, 'tischRsvp')
