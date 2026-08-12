@@ -841,6 +841,24 @@ export default function GuestListManager() {
   }, [selectedHouseholdId])
 
   const responsesLocked = Boolean(selectedHousehold?.rsvpLocked) && !responsesUnlocked
+  const selectedHasPlusOneGuest = Boolean(
+    selectedHousehold?.guests?.some((guest) => guest.type === 'plus-one'),
+  )
+
+  // Households whose named +1 seat may be skewing the attendance counts: a
+  // plus-one guest card claims the household's +1 slot, so while that card is
+  // still "Awaiting response" after the household has otherwise responded (or
+  // has "+1 accepted" checked), the promised seat isn't counted as attending.
+  const plusOneAudit = useMemo(
+    () =>
+      households.filter((household) => {
+        const plusOneGuest = household.guests.find((guest) => guest.type === 'plus-one')
+        if (!plusOneGuest) return false
+        const undecided = normalizeRsvpStatus(plusOneGuest.rsvpStatus) === 'Awaiting response'
+        return undecided && (household.plusOneAccepted || hasResponded(household))
+      }),
+    [households],
+  )
 
 
   const handleAuth = (event) => {
@@ -1468,6 +1486,29 @@ export default function GuestListManager() {
         ))}
       </div>
 
+      {plusOneAudit.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-frame">
+          <p className="text-sm font-semibold text-amber-900">Possible +1 undercounts</p>
+          <p className="mt-1 text-xs text-amber-800/90">
+            These households have a named +1 guest card that is still awaiting a response even though the household has
+            responded or has &ldquo;+1 accepted&rdquo; checked. Until that card&apos;s RSVP is set, the +1 seat is not
+            counted as attending. Tap a household to review it.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {plusOneAudit.map((household) => (
+              <button
+                key={household.id}
+                type="button"
+                onClick={() => setSelectedHouseholdId(household.id)}
+                className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:border-amber-500"
+              >
+                {household.envelopeName || 'Untitled household'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 overflow-hidden rounded-2xl border border-sage/30 bg-white/85 shadow-frame">
         <div className="flex flex-col gap-3 border-b border-sage/20 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1960,6 +2001,12 @@ export default function GuestListManager() {
                       Tisch invited
                     </label>
                   </div>
+                  {selectedHousehold.plusOneAllowed && selectedHasPlusOneGuest && (
+                    <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[0.7rem] text-amber-900">
+                      This household&apos;s +1 is the named &ldquo;+1 seat&rdquo; guest card below, so the &ldquo;+1
+                      accepted&rdquo; checkbox doesn&apos;t add another seat — set that card&apos;s own RSVP instead.
+                    </p>
+                  )}
                 </section>
 
                 <section className="space-y-3">
@@ -2000,6 +2047,19 @@ export default function GuestListManager() {
                             className={`${inputClass} font-semibold`}
                             placeholder="Guest name"
                           />
+                          {guest.type === 'plus-one' && (
+                            <span
+                              className="mt-2.5 shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-800"
+                              title="This card IS the household's +1 seat. The '+1 accepted' checkbox doesn't add another seat while this card exists."
+                            >
+                              +1 seat
+                            </span>
+                          )}
+                          {guest.type === 'child' && (
+                            <span className="mt-2.5 shrink-0 rounded-full bg-sage/15 px-2 py-0.5 text-[0.65rem] font-semibold text-sage-dark/80">
+                              Child
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeGuest(selectedHousehold.id, guest.id)}
