@@ -291,20 +291,21 @@ const eventSummaryBadge = (household, eventKey) => {
     else if (state === 'no') no += 1
     else awaiting += 1
   })
-  // An allowed +1 with no named guest yet is still an invited seat (it's
-  // counted this way in the top-line stats), so fold it into the fraction
-  // too — otherwise these badges under-count relative to the totals. Its
-  // state mirrors the top-line rule: accepted → attending; once the household
-  // has otherwise responded, an un-accepted +1 is a resolved "not attending";
-  // while the household is still silent it stays awaiting.
-  const hasPlusOneGuest = guests.some((guest) => guest.type === 'plus-one')
+  // Each guest's allotted-but-unnamed +1 is still an invited seat (it's
+  // counted this way in the top-line stats), so fold open slots into the
+  // fraction too — otherwise these badges under-count relative to the totals.
+  // Slot state mirrors the top-line rule: accepted → attending; once the
+  // household has otherwise responded, an un-accepted +1 is a resolved "not
+  // attending"; while the household is still silent it stays awaiting.
   const plusOneCountsHere =
     eventKey === 'tischRsvp' ? Boolean(household?.tischInvited) : true
-  if (household?.plusOneAllowed && !hasPlusOneGuest && plusOneCountsHere) {
-    total += 1
-    if (household.plusOneAccepted) yes += 1
-    else if (hasResponded(household)) no += 1
-    else awaiting += 1
+  if (plusOneCountsHere) {
+    openPlusOneSlots(household).forEach((host) => {
+      total += 1
+      if (host.plusOneAccepted) yes += 1
+      else if (hasResponded(household)) no += 1
+      else awaiting += 1
+    })
   }
   if (total === 0) {
     return { label: 'n/a', className: 'bg-charcoal/5 text-charcoal/40' }
@@ -538,33 +539,112 @@ const normalizeTischRsvp = (status, invited) => {
   return 'Awaiting response'
 }
 
-const ensureDerivedFields = (household) => ({
-  ...household,
-  customSlug: (() => {
-    const derived = slugify(household.envelopeName || 'household')
-    const incomingRaw = String(household.customSlug ?? '').trim()
-    const incomingKey = normalizeSlug(incomingRaw)
-    if (incomingKey) return incomingRaw
-    const legacy = normalizeSlug(household.slug)
-    return legacy && legacy !== derived ? legacy : ''
-  })(),
-  slug: (() => {
-    const derived = slugify(household.envelopeName || 'household')
-    const custom = normalizeSlug(household.customSlug)
-    if (custom) return custom
-    const legacy = normalizeSlug(household.slug)
-    return legacy && legacy !== derived ? legacy : derived
-  })(),
-  tischInvited: Boolean(household.tischInvited),
-  plusOneAccepted: Boolean(household.plusOneAccepted),
-  rsvpLocked: Boolean(household.rsvpLocked),
-  guests: (household.guests || []).map((guest) => ({
-    ...guest,
-    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
-    tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
-    dietary: guest.dietary || 'None',
-  })),
-})
+// Per-guest +1 model. Each named (non-plus-one) guest can be allotted a +1
+// (guest.plusOneAllowed) and accept it (guest.plusOneAccepted). A named +1
+// card (type 'plus-one') fills a specific guest's allotment via plusOneOf.
+// Legacy data stored one household-level +1 (household.plusOneAllowed /
+// plusOneAccepted); migrate it onto the primary guest — this preserves every
+// total, because the household's single slot becomes the primary guest's
+// single slot with identical accepted/declined/awaiting bucketing. The
+// household-level fields are kept in sync as derived values ("any guest…")
+// so older readers of the data keep working.
+export const applyPlusOneModel = (household) => {
+  const guests = Array.isArray(household.guests) ? household.guests.map((guest) => ({ ...guest })) : []
+  const hosts = guests.filter((guest) => guest.type !== 'plus-one')
+  const cards = guests.filter((guest) => guest.type === 'plus-one')
+
+  // Legacy records have no per-guest plusOneAllowed booleans; anything saved
+  // by this code always does, which makes the migration idempotent.
+  const migrated = hosts.some((guest) => typeof guest.plusOneAllowed === 'boolean')
+  if (!migrated) {
+    const primary = hosts.find((guest) => guest.type === 'primary') || hosts[0] || null
+    if (primary && (household.plusOneAllowed || cards.length > 0)) {
+      primary.plusOneAllowed = true
+      primary.plusOneAccepted = Boolean(household.plusOneAccepted)
+    }
+  }
+
+  hosts.forEach((guest) => {
+    guest.plusOneAllowed = Boolean(guest.plusOneAllowed)
+    guest.plusOneAccepted = guest.plusOneAllowed ? Boolean(guest.plusOneAccepted) : false
+  })
+
+  // Link +1 cards to hosts: keep valid one-to-one links, then hand stray
+  // cards to allotted hosts without one, then to any remaining host. A named
+  // +1 implies its host's allotment.
+  const hostIds = new Set(hosts.map((guest) => guest.id))
+  const claimed = new Set()
+  cards.forEach((card) => {
+    if (card.plusOneOf && hostIds.has(card.plusOneOf) && !claimed.has(card.plusOneOf)) {
+      claimed.add(card.plusOneOf)
+    } else {
+      card.plusOneOf = null
+    }
+  })
+  cards.forEach((card) => {
+    if (card.plusOneOf) return
+    const host =
+      hosts.find((guest) => guest.plusOneAllowed && !claimed.has(guest.id)) ||
+      hosts.find((guest) => !claimed.has(guest.id)) ||
+      null
+    if (host) {
+      card.plusOneOf = host.id
+      host.plusOneAllowed = true
+      claimed.add(host.id)
+    }
+  })
+
+  return {
+    ...household,
+    guests,
+    plusOneAllowed: hosts.some((guest) => guest.plusOneAllowed),
+    plusOneAccepted: hosts.some(
+      (guest) => guest.plusOneAllowed && guest.plusOneAccepted && !claimed.has(guest.id),
+    ),
+  }
+}
+
+// Host guests whose allotted +1 slot is still open (no named +1 card fills
+// it). Every counting site derives +1 seats from this list.
+export const openPlusOneSlots = (household) => {
+  const guests = household?.guests || []
+  const filled = new Set(
+    guests
+      .filter((guest) => guest.type === 'plus-one' && guest.plusOneOf)
+      .map((guest) => guest.plusOneOf),
+  )
+  return guests.filter(
+    (guest) => guest.type !== 'plus-one' && guest.plusOneAllowed && !filled.has(guest.id),
+  )
+}
+
+const ensureDerivedFields = (household) =>
+  applyPlusOneModel({
+    ...household,
+    customSlug: (() => {
+      const derived = slugify(household.envelopeName || 'household')
+      const incomingRaw = String(household.customSlug ?? '').trim()
+      const incomingKey = normalizeSlug(incomingRaw)
+      if (incomingKey) return incomingRaw
+      const legacy = normalizeSlug(household.slug)
+      return legacy && legacy !== derived ? legacy : ''
+    })(),
+    slug: (() => {
+      const derived = slugify(household.envelopeName || 'household')
+      const custom = normalizeSlug(household.customSlug)
+      if (custom) return custom
+      const legacy = normalizeSlug(household.slug)
+      return legacy && legacy !== derived ? legacy : derived
+    })(),
+    tischInvited: Boolean(household.tischInvited),
+    rsvpLocked: Boolean(household.rsvpLocked),
+    guests: (household.guests || []).map((guest) => ({
+      ...guest,
+      rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
+      tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
+      dietary: guest.dietary || 'None',
+    })),
+  })
 
 export const loadInitialHouseholds = () => {
   if (typeof window === 'undefined') return seedHouseholds.map(ensureDerivedFields)
@@ -768,9 +848,8 @@ export default function GuestListManager() {
     households.forEach((household) => {
       guestCount += household.guests.length
 
-      const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
-      const plusOneSlot = household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0
-      const householdMax = household.guests.length + plusOneSlot
+      const openSlots = openPlusOneSlots(household)
+      const householdMax = household.guests.length + openSlots.length
       maxInvited += householdMax
 
       const inviterKey = invitedByOptions.includes(household.invitedBy) ? household.invitedBy : 'Other'
@@ -795,12 +874,13 @@ export default function GuestListManager() {
         }
       })
 
-      // Allowed-but-unfilled +1 slot: accepted → a coming guest. Once the
-      // household has otherwise responded, an un-accepted +1 is treated as not
-      // coming (declined) so it ticks Max possible down instead of lingering in
-      // Awaiting; while the household is still silent the +1 stays awaiting.
-      if (plusOneSlot) {
-        if (household.plusOneAccepted) {
+      // Allowed-but-unfilled +1 slots (one per allotted guest): accepted → a
+      // coming guest. Once the household has otherwise responded, an
+      // un-accepted +1 is treated as not coming (declined) so it ticks Max
+      // possible down instead of lingering in Awaiting; while the household is
+      // still silent the +1 stays awaiting.
+      openSlots.forEach((host) => {
+        if (host.plusOneAccepted) {
           acceptedGuests += 1
         } else if (hasResponded(household)) {
           declinedGuests += 1
@@ -808,7 +888,7 @@ export default function GuestListManager() {
         } else {
           awaitingGuests += 1
         }
-      }
+      })
 
       // "Max possible" is the invite ceiling minus anyone who has declined, so it
       // ticks down as No RSVPs arrive (maxPossible === acceptedGuests + awaitingGuests).
@@ -841,6 +921,24 @@ export default function GuestListManager() {
   }, [selectedHouseholdId])
 
   const responsesLocked = Boolean(selectedHousehold?.rsvpLocked) && !responsesUnlocked
+
+  // Households whose named +1 seat may be skewing the attendance counts: a
+  // plus-one guest card fills its host guest's +1 slot, so while that card is
+  // still "Awaiting response" after the household has otherwise responded (or
+  // its host has "+1 accepted" checked), the promised seat isn't counted as
+  // attending.
+  const plusOneAudit = useMemo(
+    () =>
+      households.filter((household) =>
+        household.guests.some((card) => {
+          if (card.type !== 'plus-one') return false
+          if (normalizeRsvpStatus(card.rsvpStatus) !== 'Awaiting response') return false
+          const host = household.guests.find((guest) => guest.id === card.plusOneOf)
+          return Boolean(host?.plusOneAccepted) || hasResponded(household)
+        }),
+      ),
+    [households],
+  )
 
 
   const handleAuth = (event) => {
@@ -974,7 +1072,29 @@ export default function GuestListManager() {
           tischRsvp: invited ? 'Awaiting response' : 'Not invited',
           dietary: 'None',
         }
-        return { ...household, guests: [...household.guests, newGuest] }
+        if (type !== 'plus-one') {
+          newGuest.plusOneAllowed = false
+          newGuest.plusOneAccepted = false
+          return { ...household, guests: [...household.guests, newGuest] }
+        }
+        // A named +1 fills a specific guest's allotment: prefer the first
+        // guest with an open +1 slot, else the first guest without a named +1
+        // yet (implying their allotment).
+        const filled = new Set(
+          household.guests
+            .filter((guest) => guest.type === 'plus-one' && guest.plusOneOf)
+            .map((guest) => guest.plusOneOf),
+        )
+        const hosts = household.guests.filter((guest) => guest.type !== 'plus-one')
+        const host =
+          hosts.find((guest) => guest.plusOneAllowed && !filled.has(guest.id)) ||
+          hosts.find((guest) => !filled.has(guest.id)) ||
+          null
+        newGuest.plusOneOf = host?.id || null
+        const guests = household.guests.map((guest) =>
+          host && guest.id === host.id ? { ...guest, plusOneAllowed: true } : guest,
+        )
+        return { ...household, guests: [...guests, newGuest] }
       }),
     )
     markHouseholdUpsert(householdId)
@@ -1067,7 +1187,6 @@ export default function GuestListManager() {
     households.forEach((household) => {
       const householdTable = (household.table || '').trim()
       const defaultTable = householdTable || 'Unassigned'
-      const guests = household.guests || []
       ;(household.guests || []).forEach((guest) => {
         const tableName = (guest.table || defaultTable || '').trim() || 'Unassigned'
         const list = tableMap.get(tableName) || []
@@ -1080,19 +1199,19 @@ export default function GuestListManager() {
         })
         tableMap.set(tableName, list)
       })
-      const hasPlusOneGuest = guests.some((guest) => guest.type === 'plus-one')
-      if (household.plusOneAllowed && household.plusOneAccepted && !hasPlusOneGuest) {
+      openPlusOneSlots(household).forEach((host) => {
+        if (!host.plusOneAccepted) return
         const plusOneTable = defaultTable || 'Unassigned'
         const list = tableMap.get(plusOneTable) || []
         list.push({
-          id: `${household.id}-plus-one`,
-          name: 'Plus One',
+          id: `${host.id}-plus-one`,
+          name: `${host.name || 'Guest'}'s +1`,
           household: household.envelopeName || '',
           table: plusOneTable,
           isPlusOne: true,
         })
         tableMap.set(plusOneTable, list)
-      }
+      })
     })
     const entries = Array.from(tableMap.entries()).map(([table, guests]) => ({ table, guests }))
     entries.sort((a, b) => {
@@ -1137,8 +1256,8 @@ export default function GuestListManager() {
       'Invited By',
       'Invitation Sent',
       'Save The Date Sent',
-      'Plus One Allowed',
-      'Plus One Accepted',
+      'Plus Ones Allowed',
+      'Plus Ones Accepted',
       'Tisch Invited',
       'Household RSVP',
       'Household Dietary',
@@ -1155,16 +1274,18 @@ export default function GuestListManager() {
     ]
 
     const rows = households.map((household) => {
-      const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
-      const plusOneSlot = household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0
-      const guestCount = household.guests.length + plusOneSlot
+      const openSlots = openPlusOneSlots(household)
+      const allottedCount = household.guests.filter(
+        (guest) => guest.type !== 'plus-one' && guest.plusOneAllowed,
+      ).length
+      const guestCount = household.guests.length + openSlots.length
       return [
         household.envelopeName,
         household.invitedBy,
         toYesNo(household.invitationSent),
         toYesNo(household.saveTheDateSent),
-        toYesNo(household.plusOneAllowed),
-        toYesNo(household.plusOneAccepted),
+        allottedCount,
+        openSlots.filter((host) => host.plusOneAccepted).length,
         toYesNo(household.tischInvited),
         household.rsvpStatus,
         household.dietaryRestrictions,
@@ -1223,8 +1344,8 @@ export default function GuestListManager() {
             household.invitedBy,
             toYesNo(household.invitationSent),
             toYesNo(household.saveTheDateSent),
-            toYesNo(household.plusOneAllowed),
-            toYesNo(household.plusOneAccepted),
+            '',
+            '',
             toYesNo(household.tischInvited),
             normalizeTischRsvp('', household.tischInvited),
             household.table,
@@ -1250,8 +1371,8 @@ export default function GuestListManager() {
         household.invitedBy,
         toYesNo(household.invitationSent),
         toYesNo(household.saveTheDateSent),
-        toYesNo(household.plusOneAllowed),
-        toYesNo(household.plusOneAccepted),
+        guest.type === 'plus-one' ? '' : toYesNo(guest.plusOneAllowed),
+        guest.type === 'plus-one' ? '' : toYesNo(guest.plusOneAccepted),
         toYesNo(household.tischInvited),
         normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
         household.table,
@@ -1468,6 +1589,29 @@ export default function GuestListManager() {
         ))}
       </div>
 
+      {plusOneAudit.length > 0 && (
+        <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-frame">
+          <p className="text-sm font-semibold text-amber-900">Possible +1 undercounts</p>
+          <p className="mt-1 text-xs text-amber-800/90">
+            These households have a named +1 guest card that is still awaiting a response even though the household has
+            responded or has &ldquo;+1 accepted&rdquo; checked. Until that card&apos;s RSVP is set, the +1 seat is not
+            counted as attending. Tap a household to review it.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {plusOneAudit.map((household) => (
+              <button
+                key={household.id}
+                type="button"
+                onClick={() => setSelectedHouseholdId(household.id)}
+                className="rounded-full border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-900 transition hover:border-amber-500"
+              >
+                {household.envelopeName || 'Untitled household'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-6 overflow-hidden rounded-2xl border border-sage/30 bg-white/85 shadow-frame">
         <div className="flex flex-col gap-3 border-b border-sage/20 px-4 py-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -1621,8 +1765,7 @@ export default function GuestListManager() {
 
         <div className="divide-y divide-sage/15">
           {visibleHouseholds.map((household) => {
-            const hasPlusOneGuest = household.guests.some((guest) => guest.type === 'plus-one')
-            const guestCount = household.guests.length + (household.plusOneAllowed && !hasPlusOneGuest ? 1 : 0)
+            const guestCount = household.guests.length + openPlusOneSlots(household).length
             const responded = hasResponded(household)
             const awaitingMembers = hasAwaitingMembers(household)
             const responseBadge = !responded
@@ -1925,34 +2068,6 @@ export default function GuestListManager() {
                     <label className={mobileCheckboxLabelClass}>
                       <input
                         type="checkbox"
-                        checked={selectedHousehold.plusOneAllowed}
-                        onChange={() =>
-                          updateHousehold(selectedHousehold.id, {
-                            plusOneAllowed: !selectedHousehold.plusOneAllowed,
-                            plusOneAccepted: selectedHousehold.plusOneAllowed ? false : selectedHousehold.plusOneAccepted,
-                          })
-                        }
-                        className={checkboxClass}
-                      />
-                      +1 allowed
-                    </label>
-                    <label className={mobileCheckboxLabelClass}>
-                      <input
-                        type="checkbox"
-                        checked={selectedHousehold.plusOneAccepted}
-                        onChange={() =>
-                          updateHousehold(selectedHousehold.id, {
-                            plusOneAccepted: selectedHousehold.plusOneAllowed ? !selectedHousehold.plusOneAccepted : false,
-                          })
-                        }
-                        className={checkboxClass}
-                        disabled={!selectedHousehold.plusOneAllowed || responsesLocked}
-                      />
-                      +1 accepted
-                    </label>
-                    <label className={mobileCheckboxLabelClass}>
-                      <input
-                        type="checkbox"
                         checked={selectedHousehold.tischInvited}
                         onChange={() => updateHousehold(selectedHousehold.id, { tischInvited: !selectedHousehold.tischInvited })}
                         className={checkboxClass}
@@ -1960,6 +2075,10 @@ export default function GuestListManager() {
                       Tisch invited
                     </label>
                   </div>
+                  <p className="text-[0.7rem] text-charcoal/50">
+                    +1s are now per guest — use the &ldquo;+1 allowed&rdquo; / &ldquo;+1 accepted&rdquo; checkboxes on
+                    each guest card below.
+                  </p>
                 </section>
 
                 <section className="space-y-3">
@@ -2000,6 +2119,23 @@ export default function GuestListManager() {
                             className={`${inputClass} font-semibold`}
                             placeholder="Guest name"
                           />
+                          {guest.type === 'plus-one' && (
+                            <span
+                              className="mt-2.5 shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-800"
+                              title="This card fills its host guest's +1 allotment — it IS that guest's +1 seat."
+                            >
+                              {(() => {
+                                const host = selectedHousehold.guests.find((entry) => entry.id === guest.plusOneOf)
+                                const first = (host?.name || '').trim().split(/\s+/)[0]
+                                return first ? `+1 · ${first}` : '+1 seat'
+                              })()}
+                            </span>
+                          )}
+                          {guest.type === 'child' && (
+                            <span className="mt-2.5 shrink-0 rounded-full bg-sage/15 px-2 py-0.5 text-[0.65rem] font-semibold text-sage-dark/80">
+                              Child
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => removeGuest(selectedHousehold.id, guest.id)}
@@ -2059,6 +2195,55 @@ export default function GuestListManager() {
                             </label>
                           )}
                         </div>
+                        {guest.type !== 'plus-one' &&
+                          (() => {
+                            const namedPlusOne = selectedHousehold.guests.find(
+                              (entry) => entry.type === 'plus-one' && entry.plusOneOf === guest.id,
+                            )
+                            return (
+                              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                                <label
+                                  className={mobileCheckboxLabelClass}
+                                  title={namedPlusOne ? 'Remove the named +1 card to change this' : undefined}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(guest.plusOneAllowed)}
+                                    onChange={() =>
+                                      updateGuest(selectedHousehold.id, guest.id, {
+                                        plusOneAllowed: !guest.plusOneAllowed,
+                                        plusOneAccepted: guest.plusOneAllowed ? false : Boolean(guest.plusOneAccepted),
+                                      })
+                                    }
+                                    className={checkboxClass}
+                                    disabled={Boolean(namedPlusOne)}
+                                  />
+                                  +1 allowed
+                                </label>
+                                {guest.plusOneAllowed &&
+                                  (namedPlusOne ? (
+                                    <span className="text-xs text-charcoal/60">
+                                      +1: {namedPlusOne.name || 'Unnamed'}
+                                    </span>
+                                  ) : (
+                                    <label className={mobileCheckboxLabelClass}>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(guest.plusOneAccepted)}
+                                        onChange={() =>
+                                          updateGuest(selectedHousehold.id, guest.id, {
+                                            plusOneAccepted: !guest.plusOneAccepted,
+                                          })
+                                        }
+                                        className={checkboxClass}
+                                        disabled={responsesLocked}
+                                      />
+                                      +1 accepted
+                                    </label>
+                                  ))}
+                              </div>
+                            )
+                          })()}
                       </div>
                     ))}
                   </div>

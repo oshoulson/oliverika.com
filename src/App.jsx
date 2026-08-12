@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 const heroImage = '/STDEdit.jpg'
 import DoodleBoard from './components/DoodleBoard.jsx'
-import GuestListManager, { DATA_STORAGE_KEY, loadInitialHouseholds, normalizeSlug, slugify } from './components/GuestListManager.jsx'
+import GuestListManager, {
+  DATA_STORAGE_KEY,
+  applyPlusOneModel,
+  loadInitialHouseholds,
+  normalizeSlug,
+  slugify,
+} from './components/GuestListManager.jsx'
 
 const TISCH_START_TIME = '2:30 PM'
 const navLinks = [
@@ -125,20 +131,20 @@ const normalizeTischRsvp = (status, invited) => {
 }
 const getHouseholdSlugKey = (household) =>
   normalizeSlug(household?.customSlug ?? household?.slug) || slugify(household?.envelopeName || household?.name || 'household')
-const normalizeHousehold = (household) => ({
-  ...household,
-  customSlug: typeof household?.customSlug === 'string' ? household.customSlug : '',
-  slug: getHouseholdSlugKey(household),
-  tischInvited: Boolean(household.tischInvited),
-  plusOneAccepted: Boolean(household.plusOneAccepted),
-  rsvpLocked: Boolean(household.rsvpLocked),
-  guests: (household.guests || []).map((guest) => ({
-    ...guest,
-    rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
-    tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
-    dietary: guest.dietary || 'None',
-  })),
-})
+const normalizeHousehold = (household) =>
+  applyPlusOneModel({
+    ...household,
+    customSlug: typeof household?.customSlug === 'string' ? household.customSlug : '',
+    slug: getHouseholdSlugKey(household),
+    tischInvited: Boolean(household.tischInvited),
+    rsvpLocked: Boolean(household.rsvpLocked),
+    guests: (household.guests || []).map((guest) => ({
+      ...guest,
+      rsvpStatus: normalizeRsvpStatus(guest.rsvpStatus),
+      tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
+      dietary: guest.dietary || 'None',
+    })),
+  })
 
 function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [formStatus, setFormStatus] = useState('idle')
@@ -160,7 +166,8 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   const [targetTischResponses, setTargetTischResponses] = useState([])
   const [targetDietaries, setTargetDietaries] = useState([])
   const [targetNotes, setTargetNotes] = useState('')
-  const [targetPlusOne, setTargetPlusOne] = useState(false)
+  // Per-guest "+1 is coming" answers, indexed like householdMatch.guests.
+  const [targetPlusOnes, setTargetPlusOnes] = useState([])
   const [targetLocked, setTargetLocked] = useState(false)
   const [targetEmail, setTargetEmail] = useState('')
   const hiddenFileInput = useRef(null)
@@ -290,23 +297,32 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
       tischRsvp: normalizeTischRsvp(targetTischResponses[index], householdMatch?.tischInvited),
       dietary: targetDietaries[index] || guest.dietary || 'None',
+      plusOneAccepted:
+        guest.type !== 'plus-one' && guest.plusOneAllowed ? Boolean(targetPlusOnes[index]) : false,
     }))
-    const plusOneAccepted = householdMatch.plusOneAllowed ? targetPlusOne : false
+    // A +1 answer only counts for guests whose allotment isn't already filled
+    // by a named +1 card (those RSVP through their own card).
+    const filledHosts = new Set(
+      guests.filter((guest) => guest.type === 'plus-one' && guest.plusOneOf).map((guest) => guest.plusOneOf),
+    )
+    const anyPlusOneComing = guests.some(
+      (guest) => guest.type !== 'plus-one' && guest.plusOneAllowed && !filledHosts.has(guest.id) && guest.plusOneAccepted,
+    )
     const anyAccepted =
       guests.some((guest) => ['Both events', 'Ceremony only', 'Reception only'].includes(normalizeRsvpStatus(guest.rsvpStatus))) ||
-      plusOneAccepted
-    const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !plusOneAccepted
+      anyPlusOneComing
+    const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !anyPlusOneComing
     const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
-    const refreshed = {
+    // applyPlusOneModel re-derives the household-level +1 fields for legacy readers.
+    const refreshed = applyPlusOneModel({
       ...householdMatch,
       email: targetEmail,
       guests,
-      plusOneAccepted,
       notes: targetNotes,
       rsvpStatus,
       rsvpLocked: true,
       rsvpRespondedAt: new Date().toISOString(),
-    }
+    })
 
     try {
       // Persist to the shared guest list (S3) so the RSVP reaches the manager.
@@ -399,7 +415,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       setEventTouched([])
       setTargetTischResponses([])
       setTargetDietaries([])
-      setTargetPlusOne(false)
+      setTargetPlusOnes([])
       setTargetNotes('')
       setTargetEmail('')
       setTargetLocked(false)
@@ -420,7 +436,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
       (householdMatch.guests || []).map((guest) => normalizeTischRsvp(guest.tischRsvp, householdMatch.tischInvited)),
     )
     setTargetDietaries((householdMatch.guests || []).map((guest) => guest.dietary || 'None'))
-    setTargetPlusOne(Boolean(householdMatch.plusOneAccepted))
+    setTargetPlusOnes((householdMatch.guests || []).map((guest) => Boolean(guest.plusOneAccepted)))
     setTargetNotes(householdMatch.notes || '')
     setTargetEmail(householdMatch.email || '')
     setTargetLocked(Boolean(householdMatch.rsvpLocked))
@@ -790,6 +806,18 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                 {(householdMatch?.guests || []).map((guest, index) => {
                   const current = targetResponses[index] || 'Awaiting response'
                   const selections = eventSelectionsFromStatus(current)
+                  // Offer the +1 checkbox only on guests with an open allotment —
+                  // a named +1 card answers through its own card instead.
+                  const plusOneFilled = (householdMatch?.guests || []).some(
+                    (entry) => entry.type === 'plus-one' && entry.plusOneOf === guest.id,
+                  )
+                  const offersPlusOne = guest.type !== 'plus-one' && Boolean(guest.plusOneAllowed) && !plusOneFilled
+                  const setPlusOneComing = (value) =>
+                    setTargetPlusOnes((prev) => {
+                      const next = [...prev]
+                      next[index] = value
+                      return next
+                    })
                   const setDietary = (value) =>
                     setTargetDietaries((prev) => {
                       const next = [...prev]
@@ -938,22 +966,23 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
                           ))}
                         </select>
                       </div>
+                      {offersPlusOne && (
+                        <label className="flex items-center gap-3 rounded-xl border border-sage/30 bg-white/70 px-4 py-3 text-sm text-charcoal/80">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(targetPlusOnes[index])}
+                            onChange={(event) => setPlusOneComing(event.target.checked)}
+                            disabled={targetLocked}
+                            className="accent-sage h-4 w-4"
+                          />
+                          <span className="font-semibold text-sage-dark">
+                            {guest.name ? `${guest.name} is bringing a +1` : 'Bringing a +1'}
+                          </span>
+                        </label>
+                      )}
                     </div>
                   )
                 })}
-
-                {householdMatch?.plusOneAllowed && (
-                  <label className="flex items-center gap-3 rounded-2xl border border-sage/30 bg-white/70 px-4 py-3 text-sm text-charcoal/80">
-                    <input
-                      type="checkbox"
-                      checked={targetPlusOne}
-                      onChange={(event) => setTargetPlusOne(event.target.checked)}
-                      disabled={targetLocked}
-                      className="accent-sage h-4 w-4"
-                    />
-                    <span className="font-semibold text-sage-dark">Bringing your plus-one</span>
-                  </label>
-                )}
 
                 <div>
                   <label htmlFor="slug-notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
