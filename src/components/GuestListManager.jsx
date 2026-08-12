@@ -597,6 +597,10 @@ export default function GuestListManager() {
   const [filters, setFilters] = useState(() => ({ ...createDefaultFilters(), ...(initialViewPrefs?.filters || {}) }))
   const [sortBy, setSortBy] = useState(initialViewPrefs?.sortBy || defaultSortBy)
   const [selectedHouseholdId, setSelectedHouseholdId] = useState(null)
+  // Session-only override for the rsvpLocked guard on the selected household.
+  // Never persisted: the stored rsvpLocked flag stays true, so the household
+  // still counts as responded and re-locks whenever the editor is reopened.
+  const [responsesUnlocked, setResponsesUnlocked] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyState, setHistoryState] = useState({ status: 'idle', error: '', entries: [], householdId: null })
   const saveTimer = useRef(null)
@@ -831,6 +835,12 @@ export default function GuestListManager() {
     () => households.find((household) => household.id === selectedHouseholdId) || null,
     [selectedHouseholdId, households],
   )
+
+  useEffect(() => {
+    setResponsesUnlocked(false)
+  }, [selectedHouseholdId])
+
+  const responsesLocked = Boolean(selectedHousehold?.rsvpLocked) && !responsesUnlocked
 
 
   const handleAuth = (event) => {
@@ -1725,6 +1735,36 @@ export default function GuestListManager() {
                   <p className="text-[0.7rem] text-charcoal/50">Attending / total per event. Tisch shows n/a unless the household is Tisch invited.</p>
                 </section>
 
+                {selectedHousehold.rsvpLocked && (
+                  <section
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-3 ${
+                      responsesUnlocked ? 'border-amber-300 bg-amber-50' : 'border-sage/20 bg-sage/5'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className={`text-sm font-semibold ${responsesUnlocked ? 'text-amber-900' : 'text-sage-dark'}`}>
+                        {responsesUnlocked ? 'Response editing unlocked' : 'Responses locked'}
+                      </p>
+                      <p className={`text-xs ${responsesUnlocked ? 'text-amber-800/80' : 'text-charcoal/60'}`}>
+                        {responsesUnlocked
+                          ? 'Changes overwrite what this household submitted. Fields re-lock when you close this panel.'
+                          : 'This household submitted their RSVP, so response fields are read-only to prevent accidental edits.'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setResponsesUnlocked((current) => !current)}
+                      className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                        responsesUnlocked
+                          ? 'border border-amber-400 text-amber-900 hover:border-amber-500'
+                          : 'border border-sage/40 text-sage-dark hover:border-sage'
+                      }`}
+                    >
+                      {responsesUnlocked ? 'Re-lock responses' : 'Unlock editing'}
+                    </button>
+                  </section>
+                )}
+
                 <section className="space-y-3">
                   <p className="text-sm font-semibold text-sage-dark">Household details</p>
                   <label className={mobileFieldLabelClass}>
@@ -1906,7 +1946,7 @@ export default function GuestListManager() {
                           })
                         }
                         className={checkboxClass}
-                        disabled={!selectedHousehold.plusOneAllowed || selectedHousehold.rsvpLocked}
+                        disabled={!selectedHousehold.plusOneAllowed || responsesLocked}
                       />
                       +1 accepted
                     </label>
@@ -1976,7 +2016,7 @@ export default function GuestListManager() {
                               value={guest.rsvpStatus}
                               onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { rsvpStatus: event.target.value })}
                               className={selectClass}
-                              disabled={selectedHousehold.rsvpLocked}
+                              disabled={responsesLocked}
                             >
                               {rsvpOptions.map((option) => (
                                 <option key={option} value={option}>
@@ -2006,7 +2046,7 @@ export default function GuestListManager() {
                                 value={guest.tischRsvp}
                                 onChange={(event) => updateGuest(selectedHousehold.id, guest.id, { tischRsvp: event.target.value })}
                                 className={selectClass}
-                                disabled={selectedHousehold.rsvpLocked}
+                                disabled={responsesLocked}
                               >
                                 {tischRsvpOptions
                                   .filter((option) => option !== 'Not invited')
