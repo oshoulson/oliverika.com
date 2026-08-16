@@ -9,7 +9,7 @@ import GuestListManager, {
   slugify,
 } from './components/GuestListManager.jsx'
 
-const TISCH_START_TIME = '2:30 PM'
+const TISCH_START_TIME = '4:00 PM'
 const navLinks = [
   { label: 'Home', href: '#home' },
   { label: 'Gallery', href: '#gallery' },
@@ -29,7 +29,7 @@ const defaultDetails = [
 const tischDetails = [
   { label: 'Date', value: 'October 11, 2026' },
   { label: 'Tisch', value: `${TISCH_START_TIME} (songs, toasts, ketubah signing)` },
-  { label: 'Ceremony', value: 'Chuppah at 4:30 PM' },
+  { label: 'Ceremony', value: 'Chuppah at 5:00 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
   { label: 'RSVP by', value: 'July 31, 2026' },
@@ -43,7 +43,7 @@ const travelNotes = [
     linkText: 'Book your room',
   },
   { title: 'Getting There', text: 'The hotel is about a 15–20 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
-  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Honeywell Building.' },
+  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Hunnewell Building.' },
 ]
 
 const dressCodePalette = [
@@ -65,15 +65,21 @@ const baseAgendaItems = [
   },
   {
     key: 'ceremony',
-    time: '4:30 PM',
+    time: '5:00 PM',
     title: 'Ceremony',
     description: 'We will gather under the chuppah outdoors (with an indoor backup if New England weather insists).',
   },
   {
     key: 'reception',
-    time: '6:20 PM',
+    time: '5:50 PM',
     title: 'Cocktail Hour into Reception',
-    description: 'Cocktail hour flows into dinner and dancing inside the Honeywell Building. Event ends at 10:30 PM.',
+    description: 'Cocktail hour flows into dinner and dancing inside the Hunnewell Building.',
+  },
+  {
+    key: 'send-off',
+    time: '10:30 PM',
+    title: 'Festivities End',
+    description: '',
   },
 ]
 
@@ -604,7 +610,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
               <p className="font-semibold">You’re invited to the tisch</p>
               <p className="mt-1">
-                Please arrive by {TISCH_START_TIME}. We’ll sing, toast, and sign our ketubah before joining everyone at 4:30 PM.
+                Please arrive by {TISCH_START_TIME}. We’ll sing, toast, and sign our ketubah before joining everyone at 5:00 PM.
               </p>
             </div>
           )}
@@ -614,7 +620,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             <div key={item.key} className="rounded-2xl border border-sage/25 bg-white/80 p-5 shadow-sm">
               <p className="text-[0.7rem] uppercase tracking-[0.35em] text-sage-dark/70">{item.time}</p>
               <p className="mt-2 text-lg font-semibold text-sage-dark">{item.title}</p>
-              <p className="mt-1 text-sm text-charcoal/75">{item.description}</p>
+              {item.description && <p className="mt-1 text-sm text-charcoal/75">{item.description}</p>}
               {item.key === 'tisch' && (
                 <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   What’s a tisch? It’s a joyful pre-ceremony gathering with singing, toasts, and shared blessings around the table.
