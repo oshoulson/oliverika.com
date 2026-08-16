@@ -43,7 +43,7 @@ const travelNotes = [
     linkText: 'Book your room',
   },
   { title: 'Getting There', text: 'The hotel is about a 15–20 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
-  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Honeywell Building.' },
+  { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Hunnewell Building.' },
 ]
 
 const dressCodePalette = [
@@ -73,13 +73,13 @@ const baseAgendaItems = [
     key: 'reception',
     time: '5:50 PM',
     title: 'Cocktail Hour into Reception',
-    description: 'Cocktail hour flows into dinner and dancing inside the Honeywell Building.',
+    description: 'Cocktail hour flows into dinner and dancing inside the Hunnewell Building.',
   },
   {
     key: 'send-off',
     time: '10:30 PM',
     title: 'Festivities End',
-    description: 'The night wraps up and we send you off with full hearts (and probably tired feet).',
+    description: '',
   },
 ]
 
@@ -620,7 +620,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             <div key={item.key} className="rounded-2xl border border-sage/25 bg-white/80 p-5 shadow-sm">
               <p className="text-[0.7rem] uppercase tracking-[0.35em] text-sage-dark/70">{item.time}</p>
               <p className="mt-2 text-lg font-semibold text-sage-dark">{item.title}</p>
-              <p className="mt-1 text-sm text-charcoal/75">{item.description}</p>
+              {item.description && <p className="mt-1 text-sm text-charcoal/75">{item.description}</p>}
               {item.key === 'tisch' && (
                 <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   What’s a tisch? It’s a joyful pre-ceremony gathering with singing, toasts, and shared blessings around the table.
