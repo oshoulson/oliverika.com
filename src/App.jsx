@@ -71,7 +71,7 @@ const baseAgendaItems = [
   },
   {
     key: 'reception',
-    time: '6:20 PM',
+    time: '5:50 PM',
     title: 'Cocktail Hour into Reception',
     description: 'Cocktail hour flows into dinner and dancing inside the Honeywell Building. Event ends at 10:30 PM.',
   },
