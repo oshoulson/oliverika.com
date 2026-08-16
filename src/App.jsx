@@ -9,7 +9,7 @@ import GuestListManager, {
   slugify,
 } from './components/GuestListManager.jsx'
 
-const TISCH_START_TIME = '2:30 PM'
+const TISCH_START_TIME = '4:00 PM'
 const navLinks = [
   { label: 'Home', href: '#home' },
   { label: 'Gallery', href: '#gallery' },
@@ -29,7 +29,7 @@ const defaultDetails = [
 const tischDetails = [
   { label: 'Date', value: 'October 11, 2026' },
   { label: 'Tisch', value: `${TISCH_START_TIME} (songs, toasts, ketubah signing)` },
-  { label: 'Ceremony', value: 'Chuppah at 4:30 PM' },
+  { label: 'Ceremony', value: 'Chuppah at 5:00 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
   { label: 'RSVP by', value: 'July 31, 2026' },
@@ -65,7 +65,7 @@ const baseAgendaItems = [
   },
   {
     key: 'ceremony',
-    time: '4:30 PM',
+    time: '5:00 PM',
     title: 'Ceremony',
     description: 'We will gather under the chuppah outdoors (with an indoor backup if New England weather insists).',
   },
@@ -604,7 +604,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
               <p className="font-semibold">You’re invited to the tisch</p>
               <p className="mt-1">
-                Please arrive by {TISCH_START_TIME}. We’ll sing, toast, and sign our ketubah before joining everyone at 4:30 PM.
+                Please arrive by {TISCH_START_TIME}. We’ll sing, toast, and sign our ketubah before joining everyone at 5:00 PM.
               </p>
             </div>
           )}
