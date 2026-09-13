@@ -1443,14 +1443,19 @@ export default function GuestListManager() {
   }, [filters, households, sortBy])
 
   // Seats grouped by each guest's own table. Unassigned seats are kept apart
-  // from the named tables so a table can never collide with that bucket.
+  // from the named tables so a table can never collide with that bucket, and
+  // only guests attending the reception count as still needing a seat:
+  // declined guests are dropped and guests who haven't replied are tallied
+  // separately rather than listed.
   const seating = useMemo(() => {
     const tableMap = new Map()
     const unassigned = []
+    let unassignedAwaiting = 0
     const place = (tableName, seat) => {
       const name = cleanTableName(tableName)
       if (!name) {
-        unassigned.push({ ...seat, table: '' })
+        if (seat.reception === 'yes') unassigned.push({ ...seat, table: '' })
+        else if (seat.reception === 'awaiting') unassignedAwaiting += 1
         return
       }
       const list = tableMap.get(name) || []
@@ -1467,6 +1472,7 @@ export default function GuestListManager() {
           name: guest.name || 'Guest',
           household: householdName,
           isPlusOne: guest.type === 'plus-one',
+          reception: receptionStateFor(normalizeRsvpStatus(guest.rsvpStatus)),
         })
       })
       // An accepted but still unnamed +1 sits with the guest who brought them.
@@ -1479,13 +1485,15 @@ export default function GuestListManager() {
           name: `${host.name || 'Guest'}'s +1`,
           household: householdName,
           isPlusOne: true,
+          // Accepted means the +1 is coming.
+          reception: 'yes',
         })
       })
     })
     const tables = Array.from(tableMap.entries())
       .map(([name, guests]) => ({ name, guests }))
       .sort((a, b) => compareTableNames(a.name, b.name))
-    return { tables, unassigned }
+    return { tables, unassigned, unassignedAwaiting }
   }, [households])
   const seatingTables = seating.tables
   const unassignedCount = seating.unassigned.length
@@ -1722,24 +1730,34 @@ export default function GuestListManager() {
       return single.slice(0, 2).toUpperCase() || '??'
     }
 
+    const awaitingCount = seating.unassignedAwaiting
     const unassignedList =
-      seating.unassigned.length > 0 ? (
+      seating.unassigned.length > 0 || awaitingCount > 0 ? (
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-900/80">
             Unassigned · {seating.unassigned.length}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {seating.unassigned.map((seat) => (
-              <span
-                key={seat.id}
-                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-amber-200"
-                title={seat.household ? `${seat.name} · ${seat.household}` : seat.name}
-              >
-                {seat.name}
-                {seat.household && <span className="font-normal text-amber-900/60"> · {seat.household}</span>}
-              </span>
-            ))}
-          </div>
+          <p className="mt-1 text-[0.7rem] text-amber-900/70">
+            Guests attending the reception who don&apos;t have a table yet.
+            {awaitingCount > 0 &&
+              ` ${awaitingCount} more ${awaitingCount === 1 ? 'guest has' : 'guests have'} not replied yet and ${
+                awaitingCount === 1 ? 'is' : 'are'
+              } not listed.`}
+          </p>
+          {seating.unassigned.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {seating.unassigned.map((seat) => (
+                <span
+                  key={seat.id}
+                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-amber-200"
+                  title={seat.household ? `${seat.name} · ${seat.household}` : seat.name}
+                >
+                  {seat.name}
+                  {seat.household && <span className="font-normal text-amber-900/60"> · {seat.household}</span>}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ) : null
 
@@ -2822,7 +2840,7 @@ export default function GuestListManager() {
                   {unassignedCount > 0 && (
                     <span
                       className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm"
-                      title={seating.unassigned.map((seat) => seat.name).join(', ')}
+                      title={`Attending the reception, no table yet: ${seating.unassigned.map((seat) => seat.name).join(', ')}`}
                     >
                       Unassigned: {unassignedCount}
                     </span>
