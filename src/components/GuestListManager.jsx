@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { readJsonCookie, writeCookie, deleteCookie } from '../utils/cookies.js'
 /* eslint-disable react-refresh/only-export-components */
 
@@ -208,6 +208,8 @@ const sortOptions = [
   { value: 'nameDesc', label: 'Household (Z–A)' },
   { value: 'recent', label: 'RSVP: most recent first' },
   { value: 'oldest', label: 'RSVP: least recent first' },
+  { value: 'tableAsc', label: 'Table (A–Z)' },
+  { value: 'tableDesc', label: 'Table (Z–A)' },
 ]
 const defaultSortBy = 'nameAsc'
 const compareHouseholdNames = (a, b) =>
@@ -224,11 +226,72 @@ const compareByRespondedAt = (a, b, mostRecentFirst) => {
   if (aTime === bTime) return compareHouseholdNames(a, b)
   return mostRecentFirst ? bTime - aTime : aTime - bTime
 }
+// Natural, case-insensitive ordering for table names so "Table 2" sorts
+// before "Table 10".
+export const compareTableNames = (a, b) =>
+  String(a ?? '').localeCompare(String(b ?? ''), undefined, { numeric: true, sensitivity: 'base' })
+
+const cleanTableName = (value) => String(value ?? '').trim()
+
+// Unique, non-empty tables a household's guests sit at, in guest order. A
+// household spanning more than one is "split".
+export const householdTables = (household) => {
+  const names = []
+  ;(household?.guests || []).forEach((guest) => {
+    const name = cleanTableName(guest?.table)
+    if (name && !names.includes(name)) names.push(name)
+  })
+  return names
+}
+
+// The single table every member sits at, or '' once the household is split
+// across tables or anyone in it is unassigned.
+const sharedTable = (guests) => {
+  const names = (guests || []).map((guest) => cleanTableName(guest?.table))
+  if (names.length === 0) return ''
+  const first = names[0]
+  return first && names.every((name) => name === first) ? first : ''
+}
+
+// Table is a per-guest attribute (guest.table). Legacy data stored a single
+// household.table that applied to every member; copy it onto each guest that
+// has no table of its own, which reproduces the old seating exactly. Anything
+// saved by this code always writes guest.table as a string, so the migration
+// never re-fires. household.table is kept as a derived value — the table every
+// guest shares, or '' once the household is split — so older readers of the
+// data keep working and never see a table no guest actually sits at.
+export const applyTableModel = (household) => {
+  const legacyTable = cleanTableName(household?.table)
+  const guests = (household?.guests || []).map((guest) => ({
+    ...guest,
+    table: typeof guest?.table === 'string' ? guest.table : legacyTable,
+  }))
+  return { ...household, guests, table: sharedTable(guests) }
+}
+
+// Re-derive household.table after a guest-level edit (no legacy migration).
+const withDerivedTable = (household) => ({ ...household, table: sharedTable(household.guests) })
+
+// Households sort by their earliest table (natural order); households with
+// nobody seated go last in both directions, name-ordered, like the RSVP sorts.
+const compareByTable = (a, b, ascending) => {
+  const aKey = householdTables(a).sort(compareTableNames)[0] || ''
+  const bKey = householdTables(b).sort(compareTableNames)[0] || ''
+  if (!aKey && !bKey) return compareHouseholdNames(a, b)
+  if (!aKey) return 1
+  if (!bKey) return -1
+  const result = compareTableNames(aKey, bKey)
+  if (result === 0) return compareHouseholdNames(a, b)
+  return ascending ? result : -result
+}
+
 const sortComparators = {
   nameAsc: compareHouseholdNames,
   nameDesc: (a, b) => compareHouseholdNames(b, a),
   recent: (a, b) => compareByRespondedAt(a, b, true),
   oldest: (a, b) => compareByRespondedAt(a, b, false),
+  tableAsc: (a, b) => compareByTable(a, b, true),
+  tableDesc: (a, b) => compareByTable(a, b, false),
 }
 const checkboxClass =
   'h-4 w-4 rounded border border-sage/50 bg-white text-sage-dark checked:bg-sage checked:border-sage focus:ring-2 focus:ring-sage/30 focus:ring-offset-1 transition'
@@ -340,6 +403,153 @@ const EventFractionRow = ({ household, className = '' }) => (
     })}
   </div>
 )
+
+// Text input for a table name with a dropdown of the tables that already
+// exist, narrowed as you type, so a guest can be seated at an existing table
+// without recalling its exact spelling. Picking a suggestion writes that
+// table's exact name; typing something that matches nothing creates a table.
+const TableCombobox = ({ label, value, onChange, options, placeholder, className = inputClass }) => {
+  const inputId = useId()
+  const listId = `${inputId}-list`
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(-1)
+  // Whether the user has typed since focusing. Untouched, the list offers
+  // every other table to browse; once typing starts it narrows to matches
+  // (prefix matches first).
+  const [typed, setTyped] = useState(false)
+  const current = String(value ?? '')
+  const trimmed = current.trim()
+  // The field writes through on every keystroke, so the name being typed is
+  // itself already "a table" (this guest sits there). Only tables where
+  // someone other than this field's subject sits count as existing ones.
+  const others = useMemo(() => options.filter((option) => option.count - (option.own || 0) > 0), [options])
+  const query = typed ? trimmed.toLowerCase() : ''
+  const matches = useMemo(() => {
+    const filtered = query ? others.filter((option) => option.name.toLowerCase().includes(query)) : others
+    const starts = filtered.filter((option) => option.name.toLowerCase().startsWith(query))
+    const rest = filtered.filter((option) => !option.name.toLowerCase().startsWith(query))
+    return [...starts, ...rest].slice(0, 12)
+  }, [others, query])
+  const isNew =
+    typed && Boolean(trimmed) && !others.some((option) => option.name.toLowerCase() === trimmed.toLowerCase())
+  const showList = open && (matches.length > 0 || isNew)
+
+  const select = (name) => {
+    onChange(name)
+    setOpen(false)
+    setTyped(false)
+    setHighlight(-1)
+  }
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (matches.length === 0) return
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      if (!open) {
+        setOpen(true)
+        setHighlight(step === 1 ? 0 : matches.length - 1)
+        return
+      }
+      setHighlight((index) => (index + step + matches.length) % matches.length)
+      return
+    }
+    if (event.key === 'Enter') {
+      if (open && highlight >= 0 && matches[highlight]) {
+        event.preventDefault()
+        select(matches[highlight].name)
+      } else if (open) {
+        setOpen(false)
+      }
+      return
+    }
+    if (event.key === 'Escape') {
+      if (open) {
+        event.stopPropagation()
+        setOpen(false)
+      }
+      return
+    }
+    if (event.key === 'Tab') setOpen(false)
+  }
+
+  const field = (
+    <div className="relative">
+      <input
+        id={inputId}
+        type="text"
+        role="combobox"
+        aria-expanded={showList}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        autoComplete="off"
+        value={current}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setOpen(true)
+          setTyped(true)
+          setHighlight(-1)
+        }}
+        onFocus={() => {
+          setOpen(true)
+          setTyped(false)
+        }}
+        onClick={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={handleKeyDown}
+        className={className}
+        placeholder={placeholder}
+      />
+      {showList && (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-sage/30 bg-white p-1 text-left shadow-lg"
+        >
+          {matches.map((option, index) => {
+            const active = index === highlight
+            const selected = option.name === trimmed
+            return (
+              <li
+                key={option.name}
+                role="option"
+                aria-selected={selected}
+                // Keep focus in the input so blur doesn't close the list before the click lands.
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlight(index)}
+                onClick={() => select(option.name)}
+                className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg px-3 py-1.5 text-sm normal-case tracking-normal ${
+                  active ? 'bg-sage/10 text-sage-dark' : 'text-charcoal/80'
+                }`}
+              >
+                <span className="truncate font-medium">{option.name}</span>
+                <span className="shrink-0 text-xs font-normal text-charcoal/50">
+                  {selected ? 'current · ' : ''}
+                  {option.count} seat{option.count === 1 ? '' : 's'}
+                </span>
+              </li>
+            )
+          })}
+          {isNew && (
+            <li className="px-3 py-1.5 text-xs font-normal normal-case tracking-normal text-charcoal/50">
+              New table: &ldquo;{trimmed}&rdquo;
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+
+  if (!label) return field
+  // A div (not a <label>) wraps the list so clicking a suggestion doesn't
+  // re-trigger the input via label activation and pop the list back open.
+  return (
+    <div className={mobileFieldLabelClass}>
+      <label htmlFor={inputId}>{label}</label>
+      {field}
+    </div>
+  )
+}
 
 const animationStyles = `
 @keyframes guestRowFadeIn {
@@ -618,8 +828,8 @@ export const openPlusOneSlots = (household) => {
   )
 }
 
-const ensureDerivedFields = (household) =>
-  applyPlusOneModel({
+const ensureDerivedFields = (household) => {
+  const normalized = {
     ...household,
     customSlug: (() => {
       const derived = slugify(household.envelopeName || 'household')
@@ -644,7 +854,9 @@ const ensureDerivedFields = (household) =>
       tischRsvp: normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
       dietary: guest.dietary || 'None',
     })),
-  })
+  }
+  return applyTableModel(applyPlusOneModel(normalized))
+}
 
 export const loadInitialHouseholds = () => {
   if (typeof window === 'undefined') return seedHouseholds.map(ensureDerivedFields)
@@ -683,6 +895,9 @@ export default function GuestListManager() {
   const [responsesUnlocked, setResponsesUnlocked] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyState, setHistoryState] = useState({ status: 'idle', error: '', entries: [], householdId: null })
+  // Seating view: which table name is being edited inline, and the draft text.
+  const [tableRename, setTableRename] = useState(null)
+  const renameSettledRef = useRef(false)
   const saveTimer = useRef(null)
   const viewPrefsTimer = useRef(null)
   const isSavingRef = useRef(false)
@@ -1052,10 +1267,50 @@ export default function GuestListManager() {
           }
           return nextGuest
         })
-        return { ...household, guests }
+        return withDerivedTable({ ...household, guests })
       }),
     )
     markHouseholdUpsert(householdId)
+  }
+
+  // Household-wide assignment: seats every member at one table. Per-guest
+  // overrides live on each guest card.
+  const assignHouseholdTable = (householdId, tableName) => {
+    setHouseholds((prev) =>
+      prev.map((household) => {
+        if (household.id !== householdId) return household
+        const guests = household.guests.map((guest) => ({ ...guest, table: tableName }))
+        return withDerivedTable({ ...household, guests })
+      }),
+    )
+    markHouseholdUpsert(householdId)
+  }
+
+  // Rename a table everywhere it is used: every guest currently at `fromName`,
+  // in any household, moves to `toName` (merging if that table already
+  // exists). Returns the number of seats moved.
+  const renameTable = (fromName, toName) => {
+    const from = cleanTableName(fromName)
+    const to = cleanTableName(toName)
+    if (!from || !to || from === to) return 0
+    const touched = []
+    let moved = 0
+    const next = households.map((household) => {
+      let changed = false
+      const guests = household.guests.map((guest) => {
+        if (cleanTableName(guest.table) !== from) return guest
+        changed = true
+        moved += 1
+        return { ...guest, table: to }
+      })
+      if (!changed) return household
+      touched.push(household.id)
+      return withDerivedTable({ ...household, guests })
+    })
+    if (touched.length === 0) return 0
+    setHouseholds(next)
+    touched.forEach((id) => markHouseholdUpsert(id))
+    return moved
   }
 
   const addGuest = (householdId, type = 'primary') => {
@@ -1071,11 +1326,14 @@ export default function GuestListManager() {
           rsvpStatus: type === 'plus-one' ? 'Not offered' : 'Awaiting response',
           tischRsvp: invited ? 'Awaiting response' : 'Not invited',
           dietary: 'None',
+          // New members join the household's table when everyone shares one;
+          // in a split household they start unassigned.
+          table: sharedTable(household.guests),
         }
         if (type !== 'plus-one') {
           newGuest.plusOneAllowed = false
           newGuest.plusOneAccepted = false
-          return { ...household, guests: [...household.guests, newGuest] }
+          return withDerivedTable({ ...household, guests: [...household.guests, newGuest] })
         }
         // A named +1 fills a specific guest's allotment: prefer the first
         // guest with an open +1 slot, else the first guest without a named +1
@@ -1091,10 +1349,12 @@ export default function GuestListManager() {
           hosts.find((guest) => !filled.has(guest.id)) ||
           null
         newGuest.plusOneOf = host?.id || null
+        // A named +1 sits with the guest who brought them.
+        if (host) newGuest.table = cleanTableName(host.table)
         const guests = household.guests.map((guest) =>
           host && guest.id === host.id ? { ...guest, plusOneAllowed: true } : guest,
         )
-        return { ...household, guests: [...guests, newGuest] }
+        return withDerivedTable({ ...household, guests: [...guests, newGuest] })
       }),
     )
     markHouseholdUpsert(householdId)
@@ -1111,7 +1371,7 @@ export default function GuestListManager() {
       prev.map((household) => {
         if (household.id !== householdId) return household
         const remaining = household.guests.filter((guest) => guest.id !== guestId)
-        return { ...household, guests: remaining.length > 0 ? remaining : household.guests }
+        return withDerivedTable({ ...household, guests: remaining.length > 0 ? remaining : household.guests })
       }),
     )
     markHouseholdUpsert(householdId)
@@ -1182,49 +1442,63 @@ export default function GuestListManager() {
     return [...filtered].sort(comparator)
   }, [filters, households, sortBy])
 
-  const seatingTables = useMemo(() => {
+  // Seats grouped by each guest's own table. Unassigned seats are kept apart
+  // from the named tables so a table can never collide with that bucket.
+  const seating = useMemo(() => {
     const tableMap = new Map()
+    const unassigned = []
+    const place = (tableName, seat) => {
+      const name = cleanTableName(tableName)
+      if (!name) {
+        unassigned.push({ ...seat, table: '' })
+        return
+      }
+      const list = tableMap.get(name) || []
+      list.push({ ...seat, table: name })
+      tableMap.set(name, list)
+    }
     households.forEach((household) => {
-      const householdTable = (household.table || '').trim()
-      const defaultTable = householdTable || 'Unassigned'
+      const householdName = household.envelopeName || ''
       ;(household.guests || []).forEach((guest) => {
-        const tableName = (guest.table || defaultTable || '').trim() || 'Unassigned'
-        const list = tableMap.get(tableName) || []
-        list.push({
+        place(guest.table, {
           id: guest.id,
+          guestId: guest.id,
+          householdId: household.id,
           name: guest.name || 'Guest',
-          household: household.envelopeName || '',
-          table: tableName,
+          household: householdName,
           isPlusOne: guest.type === 'plus-one',
         })
-        tableMap.set(tableName, list)
       })
+      // An accepted but still unnamed +1 sits with the guest who brought them.
       openPlusOneSlots(household).forEach((host) => {
         if (!host.plusOneAccepted) return
-        const plusOneTable = defaultTable || 'Unassigned'
-        const list = tableMap.get(plusOneTable) || []
-        list.push({
+        place(host.table, {
           id: `${host.id}-plus-one`,
+          guestId: host.id,
+          householdId: household.id,
           name: `${host.name || 'Guest'}'s +1`,
-          household: household.envelopeName || '',
-          table: plusOneTable,
+          household: householdName,
           isPlusOne: true,
         })
-        tableMap.set(plusOneTable, list)
       })
     })
-    const entries = Array.from(tableMap.entries()).map(([table, guests]) => ({ table, guests }))
-    entries.sort((a, b) => {
-      if (a.table === 'Unassigned') return 1
-      if (b.table === 'Unassigned') return -1
-      return a.table.localeCompare(b.table)
-    })
-    return entries
+    const tables = Array.from(tableMap.entries())
+      .map(([name, guests]) => ({ name, guests }))
+      .sort((a, b) => compareTableNames(a.name, b.name))
+    return { tables, unassigned }
   }, [households])
-  const unassignedCount = useMemo(() => {
-    const unassigned = seatingTables.find((entry) => entry.table === 'Unassigned')
-    return unassigned?.guests?.length || 0
-  }, [seatingTables])
+  const seatingTables = seating.tables
+  const unassignedCount = seating.unassigned.length
+  // Suggestions for a table field: every table with its seat count, plus how
+  // many of those seats belong to the field's own subject (one guest and their
+  // +1 slot, or a whole household). The combobox uses `own` to tell a table
+  // other people sit at from the name currently being typed into this field.
+  const tableOptionsFor = (isOwnSeat) =>
+    seatingTables.map((entry) => ({
+      name: entry.name,
+      count: entry.guests.length,
+      own: entry.guests.filter(isOwnSeat).length,
+    }))
 
   const downloadCsv = (headers, rows, filename) => {
     const csvContent = [headers, ...rows]
@@ -1289,7 +1563,7 @@ export default function GuestListManager() {
         toYesNo(household.tischInvited),
         household.rsvpStatus,
         household.dietaryRestrictions,
-        household.table,
+        householdTables(household).join(' / '),
         household.email,
         household.phone,
         household.address.line1,
@@ -1348,7 +1622,7 @@ export default function GuestListManager() {
             '',
             toYesNo(household.tischInvited),
             normalizeTischRsvp('', household.tischInvited),
-            household.table,
+            '',
             household.email,
             household.phone,
             household.address.line1,
@@ -1375,7 +1649,7 @@ export default function GuestListManager() {
         guest.type === 'plus-one' ? '' : toYesNo(guest.plusOneAccepted),
         toYesNo(household.tischInvited),
         normalizeTischRsvp(guest.tischRsvp, household.tischInvited),
-        household.table,
+        cleanTableName(guest.table),
         household.email,
         household.phone,
         household.address.line1,
@@ -1401,6 +1675,43 @@ export default function GuestListManager() {
     setSelectedHouseholdId(nextHousehold.id)
   }
 
+  const startTableRename = (name) => {
+    renameSettledRef.current = false
+    setTableRename({ name, draft: name })
+  }
+
+  const cancelTableRename = () => {
+    renameSettledRef.current = true
+    setTableRename(null)
+  }
+
+  // Enter/Save and the input's blur can both fire for one edit (the blur
+  // arrives as the input unmounts), so settle each edit exactly once.
+  const commitTableRename = () => {
+    if (renameSettledRef.current) return
+    const pending = tableRename
+    if (!pending) return
+    renameSettledRef.current = true
+    setTableRename(null)
+    const from = cleanTableName(pending.name)
+    const to = cleanTableName(pending.draft)
+    if (!to || to === from) return
+    const existing = seatingTables.find((entry) => entry.name === to)
+    if (existing) {
+      const proceed = window.confirm(
+        `A table named “${to}” already exists (${existing.guests.length} seat${existing.guests.length === 1 ? '' : 's'}). ` +
+          `Merge “${from}” into it? Everyone at “${from}” will move to “${to}”.`,
+      )
+      if (!proceed) return
+    }
+    renameTable(from, to)
+  }
+
+  const closeSeatingView = () => {
+    setTableRename(null)
+    setShowSeatingView(false)
+  }
+
   const renderSeatingTables = () => {
     const initialsForName = (name) => {
       const parts = (name || '').trim().split(/\s+/).filter(Boolean)
@@ -1411,22 +1722,43 @@ export default function GuestListManager() {
       return single.slice(0, 2).toUpperCase() || '??'
     }
 
-    const assignedTables = seatingTables.filter((entry) => entry.table !== 'Unassigned')
-
-    if (assignedTables.length === 0) {
-      return (
-        <div className="rounded-2xl border border-sage/30 bg-white/80 p-6 text-center text-sm text-charcoal/70">
-          No assigned tables yet. Add table names to households to see them here.
-          {unassignedCount > 0 && (
-            <p className="mt-2 text-xs font-semibold text-sage-dark">Unassigned guests: {unassignedCount}</p>
-          )}
+    const unassignedList =
+      seating.unassigned.length > 0 ? (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-900/80">
+            Unassigned · {seating.unassigned.length}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {seating.unassigned.map((seat) => (
+              <span
+                key={seat.id}
+                className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm ring-1 ring-amber-200"
+                title={seat.household ? `${seat.name} · ${seat.household}` : seat.name}
+              >
+                {seat.name}
+                {seat.household && <span className="font-normal text-amber-900/60"> · {seat.household}</span>}
+              </span>
+            ))}
+          </div>
         </div>
+      ) : null
+
+    if (seatingTables.length === 0) {
+      return (
+        <>
+          <div className="mt-4 rounded-2xl border border-sage/30 bg-white/80 p-6 text-center text-sm text-charcoal/70">
+            No assigned tables yet. Give guests a table from the household editor to see them here.
+          </div>
+          {unassignedList}
+        </>
       )
     }
 
     const getSeatPosition = (index, total) => {
       const angle = (index / total) * 2 * Math.PI - Math.PI / 2
-      const radiusPercent = 38
+      // 36% keeps the widest seat label (7rem, centred on the seat) inside
+      // the card's padding at the grid's minimum column width.
+      const radiusPercent = 36
       return {
         left: `${50 + Math.cos(angle) * radiusPercent}%`,
         top: `${50 + Math.sin(angle) * radiusPercent}%`,
@@ -1434,46 +1766,139 @@ export default function GuestListManager() {
     }
 
     return (
-      <div className="mt-4 flex flex-wrap gap-6">
-        {assignedTables.map((entry, index) => {
-          const offsetClass = index % 2 === 1 ? 'md:translate-x-10' : ''
-          const guests = entry.guests || []
-          const count = guests.length || 1
-          return (
-            <div
-              key={entry.table}
-              className={`relative w-full max-w-xs flex-1 rounded-2xl border border-sage/30 bg-white/85 p-4 shadow-frame ${offsetClass}`}
-            >
-              <p className="text-xs uppercase tracking-[0.35em] text-sage-dark/70">{entry.table}</p>
-              <div className="relative mx-auto mt-4 h-72 w-72">
-                <div className="absolute inset-0 rounded-full border-2 border-sage/40 bg-sage/5" />
-                <div className="absolute inset-[18%] rounded-full border border-sage/20 bg-white/80 shadow-inner" />
-                <div className="absolute left-1/2 top-1/2 z-10 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-sage text-white shadow-lg">
-                  <span className="text-xl font-semibold">{count}</span>
-                </div>
-                {guests.map((guest, seatIndex) => {
-                  const pos = getSeatPosition(seatIndex, count)
-                  const badgeText = guest.isPlusOne ? '+1' : initialsForName(guest.name)
-                  return (
-                    <div
-                      key={`${guest.id}-${seatIndex}`}
-                      className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-                      style={pos}
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-b from-sage to-sage-dark text-xs font-semibold text-white shadow-lg shadow-sage/30">
-                        {badgeText}
-                      </div>
-                      <span className="mt-1 max-w-[120px] truncate rounded-full bg-white/90 px-2 py-1 text-[0.7rem] font-semibold text-sage-dark shadow-sm ring-1 ring-sage/20">
-                        {guest.name}
-                      </span>
+      <>
+        {/*
+          Equal-width grid columns (no per-card offsets or flex growth) so the
+          cards snap to clean rows and columns. Each card clips its own
+          content and the seat labels are capped narrow enough to stay inside
+          the circle's box, so neighbouring cards can no longer overlap.
+        */}
+        <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(min(20rem,100%),1fr))] gap-6">
+          {seatingTables.map((entry) => {
+            const guests = entry.guests || []
+            const count = guests.length
+            const seatTotal = count || 1
+            const householdCount = new Set(guests.map((guest) => guest.household)).size
+            const isRenaming = tableRename?.name === entry.name
+            const draftClean = isRenaming ? cleanTableName(tableRename.draft) : ''
+            const mergeTarget =
+              isRenaming && draftClean && draftClean !== entry.name
+                ? seatingTables.find((candidate) => candidate.name === draftClean) || null
+                : null
+            return (
+              <div
+                key={entry.name}
+                className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-sage/30 bg-white/85 p-4 shadow-frame"
+              >
+                {isRenaming ? (
+                  <div className="min-w-0">
+                    <label className={mobileFieldLabelClass}>
+                      Rename table
+                      <input
+                        type="text"
+                        autoFocus
+                        value={tableRename.draft}
+                        onChange={(event) =>
+                          setTableRename((current) => (current ? { ...current, draft: event.target.value } : current))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            commitTableRename()
+                          } else if (event.key === 'Escape') {
+                            event.preventDefault()
+                            cancelTableRename()
+                          }
+                        }}
+                        onBlur={commitTableRename}
+                        className={`${inputClass} font-semibold`}
+                        aria-label={`Rename table ${entry.name}`}
+                      />
+                    </label>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={commitTableRename}
+                        className="rounded-full bg-sage px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-sage-dark"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={cancelTableRename}
+                        className="rounded-full border border-sage/40 px-3 py-1 text-xs font-semibold text-sage-dark transition hover:border-sage"
+                      >
+                        Cancel
+                      </button>
+                      <span className="text-[0.7rem] text-charcoal/50">Applies to every guest at this table.</span>
                     </div>
-                  )
-                })}
+                    {mergeTarget && (
+                      <p className="mt-2 text-[0.7rem] font-semibold text-amber-800">
+                        &ldquo;{mergeTarget.name}&rdquo; already exists — saving merges the two tables ({count + mergeTarget.guests.length} seats).
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => startTableRename(entry.name)}
+                        className="block max-w-full truncate text-left text-xs uppercase tracking-[0.35em] text-sage-dark/70 transition hover:text-sage-dark"
+                        title="Click to rename this table"
+                      >
+                        {entry.name}
+                      </button>
+                      <p className="mt-0.5 text-[0.7rem] text-charcoal/50">
+                        {count} seat{count === 1 ? '' : 's'}
+                        {householdCount > 1 ? ` · ${householdCount} households` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => startTableRename(entry.name)}
+                      className="shrink-0 rounded-full border border-sage/40 px-2.5 py-1 text-[0.7rem] font-semibold text-sage-dark transition hover:border-sage"
+                      aria-label={`Rename table ${entry.name}`}
+                    >
+                      Rename
+                    </button>
+                  </div>
+                )}
+                <div className="relative mx-auto mt-4 aspect-square w-full max-w-[20rem]">
+                  <div className="absolute inset-0 rounded-full border-2 border-sage/40 bg-sage/5" />
+                  <div className="absolute inset-[18%] rounded-full border border-sage/20 bg-white/80 shadow-inner" />
+                  <div className="absolute left-1/2 top-1/2 z-10 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-sage text-white shadow-lg">
+                    <span className="text-xl font-semibold">{count}</span>
+                  </div>
+                  {guests.map((guest, seatIndex) => {
+                    const pos = getSeatPosition(seatIndex, seatTotal)
+                    const badgeText = guest.isPlusOne ? '+1' : initialsForName(guest.name)
+                    const tooltip = guest.household ? `${guest.name} · ${guest.household}` : guest.name
+                    return (
+                      <div
+                        key={`${guest.id}-${seatIndex}`}
+                        className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+                        style={pos}
+                        title={tooltip}
+                      >
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-b from-sage to-sage-dark text-xs font-semibold text-white shadow-lg shadow-sage/30">
+                          {badgeText}
+                        </div>
+                        <span className="mt-1 max-w-[7rem] truncate rounded-full bg-white/90 px-2 py-1 text-[0.7rem] font-semibold text-sage-dark shadow-sm ring-1 ring-sage/20">
+                          {guest.name}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          )
-        })}
-      </div>
+            )
+          })}
+        </div>
+        {unassignedList}
+      </>
     )
   }
 
@@ -1776,6 +2201,8 @@ export default function GuestListManager() {
             const ceremony = eventSummaryBadge(household, 'ceremonyRsvp')
             const reception = eventSummaryBadge(household, 'receptionRsvp')
             const tisch = eventSummaryBadge(household, 'tischRsvp')
+            const tables = householdTables(household)
+            const tableLabel = tables.join(' / ')
             const isActive = selectedHouseholdId === household.id
             return (
               <button
@@ -1822,9 +2249,19 @@ export default function GuestListManager() {
                       {tisch.label}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 md:justify-end">
+                  <div className="flex min-w-0 items-center gap-2 md:justify-end">
                     <span className="md:hidden text-[0.7rem] font-semibold uppercase text-sage-dark/60">Table</span>
-                    <span className="truncate text-sm text-charcoal/80">{household.table || '—'}</span>
+                    {tables.length > 1 && (
+                      <span
+                        className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-800"
+                        title="Members of this household sit at different tables"
+                      >
+                        Split
+                      </span>
+                    )}
+                    <span className="truncate text-sm text-charcoal/80" title={tableLabel || undefined}>
+                      {tableLabel || '—'}
+                    </span>
                   </div>
                 </div>
               </button>
@@ -1948,17 +2385,24 @@ export default function GuestListManager() {
                         ))}
                       </select>
                     </label>
-                    <label className={mobileFieldLabelClass}>
-                      Table
-                      <input
-                        type="text"
-                        value={selectedHousehold.table}
-                        onChange={(event) => updateHousehold(selectedHousehold.id, { table: event.target.value })}
-                        className={inputClass}
-                        placeholder="Table name or number"
-                      />
-                    </label>
+                    {(() => {
+                      const tables = householdTables(selectedHousehold)
+                      const mixed = tables.length > 0 && !selectedHousehold.table
+                      return (
+                        <TableCombobox
+                          label="Table (whole household)"
+                          value={selectedHousehold.table}
+                          onChange={(name) => assignHouseholdTable(selectedHousehold.id, name)}
+                          options={tableOptionsFor((seat) => seat.householdId === selectedHousehold.id)}
+                          placeholder={mixed ? 'Mixed — set per guest below' : 'Table name or number'}
+                        />
+                      )
+                    })()}
                   </div>
+                  <p className="text-[0.7rem] text-charcoal/50">
+                    Seats everyone in the household together. To split the household across tables, use the Table field
+                    on each guest card below.
+                  </p>
                   <label className={mobileFieldLabelClass}>
                     Household dietary
                     <select
@@ -2175,8 +2619,15 @@ export default function GuestListManager() {
                               ))}
                             </select>
                           </label>
+                          <TableCombobox
+                            label="Table"
+                            value={guest.table || ''}
+                            onChange={(name) => updateGuest(selectedHousehold.id, guest.id, { table: name })}
+                            options={tableOptionsFor((seat) => seat.guestId === guest.id)}
+                            placeholder="Unassigned"
+                          />
                           {selectedHousehold.tischInvited && (
-                            <label className={`${mobileFieldLabelClass} sm:col-span-2`}>
+                            <label className={mobileFieldLabelClass}>
                               Tisch RSVP
                               <select
                                 value={guest.tischRsvp}
@@ -2353,7 +2804,7 @@ export default function GuestListManager() {
         <>
           <button
             type="button"
-            onClick={() => setShowSeatingView(false)}
+            onClick={closeSeatingView}
             className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm"
             aria-label="Close seating view"
           />
@@ -2363,18 +2814,22 @@ export default function GuestListManager() {
                 <div>
                   <p className="text-xs uppercase tracking-[0.4em] text-sage-dark/70">Seating view</p>
                   <p className="text-sm text-charcoal/70">
-                    Circles are grouped by guest table. Guests inherit their household table unless a guest-level table is set.
+                    Each guest has their own table, so a household can be split. Click a table name to rename it for
+                    everyone seated there.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {unassignedCount > 0 && (
-                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm">
+                    <span
+                      className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm"
+                      title={seating.unassigned.map((seat) => seat.name).join(', ')}
+                    >
                       Unassigned: {unassignedCount}
                     </span>
                   )}
                   <button
                     type="button"
-                    onClick={() => setShowSeatingView(false)}
+                    onClick={closeSeatingView}
                     className="rounded-full border border-sage/40 px-4 py-2 text-sm font-semibold text-sage-dark transition hover:border-sage hover:text-sage-dark"
                   >
                     Close
