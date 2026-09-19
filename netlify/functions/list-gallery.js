@@ -12,6 +12,8 @@ const GUEST_LIST_PREFIX_WITH_SLASH = GUEST_LIST_PREFIX ? `${GUEST_LIST_PREFIX}/`
 const isImageKey = (key) => /\.(png|jpe?g|gif|webp|avif|heic)$/i.test(key)
 
 const CACHE_MAX = 60
+// Newest photos shown in the gallery; each one costs a signed URL per request.
+const GALLERY_MAX = 300
 
 export async function handler(event) {
   if (event.httpMethod && event.httpMethod !== 'GET') {
@@ -20,20 +22,31 @@ export async function handler(event) {
 
   try {
     const client = getS3Client()
-    const command = new ListObjectsV2Command({
-      Bucket: BUCKET,
-      Prefix: KEY_PREFIX_WITH_SLASH || undefined,
-      MaxKeys: 50,
-    })
+    // Page through the whole prefix: keys list oldest-first, so a single
+    // capped page would never show uploads past the first MaxKeys objects.
+    const Contents = []
+    let ContinuationToken
+    do {
+      const page = await client.send(
+        new ListObjectsV2Command({
+          Bucket: BUCKET,
+          Prefix: KEY_PREFIX_WITH_SLASH || undefined,
+          ContinuationToken,
+        }),
+      )
+      Contents.push(...(page.Contents || []))
+      ContinuationToken = page.IsTruncated ? page.NextContinuationToken : undefined
+    } while (ContinuationToken)
 
-    const { Contents = [] } = await client.send(command)
     const filtered = Contents.filter((item) => {
       if (!item.Key || item.Key.endsWith('/')) return false
       if (DOODLE_PREFIX_WITH_SLASH && item.Key.startsWith(DOODLE_PREFIX_WITH_SLASH)) return false
       if (GUEST_LIST_PREFIX_WITH_SLASH && item.Key.startsWith(GUEST_LIST_PREFIX_WITH_SLASH)) return false
       if (!isImageKey(item.Key)) return false
       return true
-    }).sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+    })
+      .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+      .slice(0, GALLERY_MAX)
 
     const items = await Promise.all(
       filtered.map(async (item) => {
