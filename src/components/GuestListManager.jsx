@@ -1019,9 +1019,17 @@ export default function GuestListManager() {
       if (!response.ok) {
         throw new Error('Save failed')
       }
-      upsertIds.forEach((id) => dirtyUpsertsRef.current.delete(id))
+      // A household edited while this request was in flight (e.g. still typing
+      // a table name) stays dirty, otherwise the server keeps the half-typed
+      // value that was sent.
+      const sentById = new Map(upserts.map((household) => [household.id, household]))
+      upsertIds.forEach((id) => {
+        const current = householdsRef.current.find((household) => household.id === id)
+        if (!current || current === sentById.get(id)) dirtyUpsertsRef.current.delete(id)
+      })
       deleteIds.forEach((id) => dirtyDeletesRef.current.delete(id))
       setRemoteStatus('saved')
+      if (dirtyUpsertsRef.current.size > 0 || dirtyDeletesRef.current.size > 0) queuePersist()
     } catch (error) {
       console.error('save guest list error', error)
       setRemoteStatus('error')
