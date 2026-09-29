@@ -1680,6 +1680,22 @@ export default function GuestListManager() {
     downloadCsv(headers, rows, 'guest-list-guests.csv')
   }
 
+  // Just attendees (anyone attending at least one event) and their dietary
+  // restriction, for handing to the caterer.
+  const exportDietaryCsv = () => {
+    const rows = households.flatMap((household) =>
+      (household.guests || [])
+        .filter((guest) =>
+          ['ceremonyRsvp', 'receptionRsvp', 'tischRsvp'].some(
+            (eventKey) => guestEventState(household, guest, eventKey) === 'yes',
+          ),
+        )
+        .map((guest) => [guest.name, guest.dietary || 'None']),
+    )
+
+    downloadCsv(['Attendee', 'Dietary Restrictions'], rows, 'attendee-dietary.csv')
+  }
+
   const insertHousehold = (nextHousehold) => {
     setHouseholds((prev) => [...prev, nextHousehold])
     markHouseholdUpsert(nextHousehold.id)
@@ -2198,6 +2214,16 @@ export default function GuestListManager() {
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
                   >
                     Export all guests
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      exportDietaryCsv()
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-sage-dark hover:bg-sage/10"
+                  >
+                    Export attendee dietary
                   </button>
                 </div>
               )}
