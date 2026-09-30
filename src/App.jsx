@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { readCookie, writeCookie } from './utils/cookies.js'
 const heroImage = '/STDEdit.jpg'
 import GuestListManager, {
   DATA_STORAGE_KEY,
@@ -9,6 +10,9 @@ import GuestListManager, {
 } from './components/GuestListManager.jsx'
 
 const TISCH_START_TIME = '4:00 PM'
+// Remembers tisch invitees who opened their invite link, so the plain homepage
+// still shows them tisch timing on later visits.
+const TISCH_COOKIE = 'oliverikaTisch'
 const navLinks = [
   { label: 'Home', href: '#home' },
   { label: 'FAQ', href: '#faq' },
@@ -35,11 +39,11 @@ const tischDetails = [
 const travelNotes = [
   {
     title: 'Stay Nearby',
-    text: 'We reserved a block at the Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, about 15–20 minutes from the venue). Book by September 9 for Friday–Monday, October 9–12.',
+    text: 'We reserved a block at the Residence Inn by Marriott Boston Natick ($229/night, full-suite rooms with kitchens, about 15 minutes from the venue). Book by September 9 for Friday–Monday, October 9–12.',
     link: 'https://app.marriott.com/reslink?id=1770067768707&key=GRP&app=resvlink',
     linkText: 'Book your room',
   },
-  { title: 'Getting There', text: 'The hotel is about a 15–20 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
+  { title: 'Getting There', text: 'The hotel is about a 15 minute drive from the venue. We won\'t be providing transportation, but rideshare is easy and there is limited parking available on site. Rideshare drop-off at the Cheney Gate entrance.' },
   { title: 'Dress Code', text: 'Cocktail; Autumn Colors. Please plan for an outdoor ceremony on grass followed by a reception inside the Hunnewell Building.' },
 ]
 
@@ -60,12 +64,9 @@ const faqItems = [
   },
   {
     q: 'Will there be transportation from the hotel?',
-    a: 'Unfortunately, because of weight restrictions on a bridge leading into the property, we are not able to provide a bus or shuttle from the hotel. The garden is a very short Uber/taxi ride from the hotel, though!',
+    a: 'Unfortunately, because of weight restrictions on a bridge leading into the property, we are not able to provide a bus or shuttle from the hotel. The garden is about a 15 minute Uber/taxi ride from the hotel, though!',
   },
-  {
-    q: 'Where do I get dropped off, and is there parking?',
-    a: 'Rideshare drop-off is at the Cheney Gate entrance. There is limited parking on site, so we recommend Uber/taxi or carpooling if you can.',
-  },
+
   {
     key: 'dress',
     q: 'What should I wear?',
@@ -204,7 +205,8 @@ function WeddingSite({ householdMatch }) {
   const [galleryError, setGalleryError] = useState('')
   const hiddenFileInput = useRef(null)
 
-  const isTischInvite = Boolean(householdMatch?.tischInvited)
+  const [hasTischCookie, setHasTischCookie] = useState(() => readCookie(TISCH_COOKIE) === '1')
+  const isTischInvite = householdMatch ? Boolean(householdMatch.tischInvited) : hasTischCookie
   const heroDetails = isTischInvite ? tischDetails : defaultDetails
   const agendaItems = isTischInvite ? [tischAgendaItem, ...baseAgendaItems] : baseAgendaItems
 
@@ -245,6 +247,12 @@ function WeddingSite({ householdMatch }) {
   useEffect(() => {
     refreshGallery()
   }, [])
+
+  useEffect(() => {
+    if (!householdMatch?.tischInvited) return
+    writeCookie(TISCH_COOKIE, '1')
+    setHasTischCookie(true)
+  }, [householdMatch])
 
   const triggerFilePicker = () => {
     hiddenFileInput.current?.click()
@@ -323,7 +331,9 @@ function WeddingSite({ householdMatch }) {
     <>
       <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
         <p className="font-semibold">
-          We can't wait to see you so soon! Please arrive at Elm Bank at 4:30 for a ceremony beginning at 5!
+          {isTischInvite
+            ? "We can't wait to see you so soon! Please arrive at Elm Bank at 4:00 for the tisch, before the ceremony begins at 5!"
+            : "We can't wait to see you so soon! Please arrive at Elm Bank at 4:30 for a ceremony beginning at 5!"}
         </p>
       </div>
       <main className="min-h-screen bg-mist px-4 py-12 pt-28 sm:px-8 sm:pt-20">
