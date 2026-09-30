@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 const heroImage = '/STDEdit.jpg'
-import DoodleBoard from './components/DoodleBoard.jsx'
 import GuestListManager, {
   DATA_STORAGE_KEY,
   applyPlusOneModel,
@@ -15,7 +14,6 @@ const navLinks = [
   { label: 'FAQ', href: '#faq' },
   { label: 'Gallery', href: '#gallery' },
   { label: 'Travel', href: '#travel' },
-  { label: 'RSVP', href: '#rsvp' },
   { label: 'Registry', href: '#registry' },
 ]
 
@@ -24,7 +22,6 @@ const defaultDetails = [
   { label: 'Arrival', value: 'Guests at 4:30 PM' },
   { label: 'Venue', value: 'The Garden at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
-  { label: 'RSVP by', value: 'July 31, 2026' },
 ]
 
 const tischDetails = [
@@ -33,7 +30,6 @@ const tischDetails = [
   { label: 'Ceremony', value: 'Chuppah at 5:00 PM' },
   { label: 'Venue', value: 'The Gardens at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
-  { label: 'RSVP by', value: 'July 31, 2026' },
 ]
 
 const travelNotes = [
@@ -163,8 +159,6 @@ const fallbackGallery = [
 ]
 
 const FUNCTIONS_BASE = '/.netlify/functions'
-const RSVP_STORAGE_KEY = 'oliverikaRsvpSubmitted'
-const dietaryOptions = ['None', 'Vegetarian', 'Vegan', 'Gluten Free', 'Dairy Free', 'Peanut Allergy', 'Other']
 const normalizeRsvpStatus = (status) => {
   const value = (status || '').trim()
   if (['Both events', 'Ceremony only', 'Reception only', 'Not attending', 'Awaiting response'].includes(value)) {
@@ -201,219 +195,18 @@ const normalizeHousehold = (household) =>
     })),
   })
 
-function WeddingSite({ householdMatch, onHouseholdUpdate }) {
-  const [formStatus, setFormStatus] = useState('idle')
-  const [formError, setFormError] = useState('')
-  const [hasSubmitted, setHasSubmitted] = useState(false)
-  const [submissionAction, setSubmissionAction] = useState('created')
+function WeddingSite({ householdMatch }) {
   const [selectedFiles, setSelectedFiles] = useState([])
   const [uploadStatus, setUploadStatus] = useState('idle')
   const [uploadError, setUploadError] = useState('')
   const [galleryItems, setGalleryItems] = useState(fallbackGallery)
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryError, setGalleryError] = useState('')
-  const [hasDoodle, setHasDoodle] = useState(false)
-  const [targetResponses, setTargetResponses] = useState([])
-  // Per-guest record of which events were *explicitly* answered. The combined
-  // rsvpStatus enum can't distinguish "skipping reception" from "reception not
-  // decided yet", so we track that separately to drive the Skip button highlight.
-  const [eventTouched, setEventTouched] = useState([])
-  const [targetTischResponses, setTargetTischResponses] = useState([])
-  const [targetDietaries, setTargetDietaries] = useState([])
-  const [targetNotes, setTargetNotes] = useState('')
-  // Per-guest "+1 is coming" answers, indexed like householdMatch.guests.
-  const [targetPlusOnes, setTargetPlusOnes] = useState([])
-  const [targetLocked, setTargetLocked] = useState(false)
-  const [targetEmail, setTargetEmail] = useState('')
   const hiddenFileInput = useRef(null)
-  const doodleBoardRef = useRef(null)
-  const [lookupQuery, setLookupQuery] = useState('')
-  const [lookupError, setLookupError] = useState('')
 
-  const submissionLocked = hasSubmitted
-  const isSlugRsvp = Boolean(householdMatch)
   const isTischInvite = Boolean(householdMatch?.tischInvited)
   const heroDetails = isTischInvite ? tischDetails : defaultDetails
   const agendaItems = isTischInvite ? [tischAgendaItem, ...baseAgendaItems] : baseAgendaItems
-
-  const eventSelectionsFromStatus = (status) => {
-    const normalized = normalizeRsvpStatus(status)
-    return {
-      ceremony: ['Both events', 'Ceremony only'].includes(normalized),
-      reception: ['Both events', 'Reception only'].includes(normalized),
-    }
-  }
-
-  const statusFromSelections = (selections) => {
-    if (selections.ceremony && selections.reception) return 'Both events'
-    if (selections.ceremony) return 'Ceremony only'
-    if (selections.reception) return 'Reception only'
-    return 'Not attending'
-  }
-
-  const markEventTouched = (index, updates) => {
-    setEventTouched((prev) => {
-      const next = [...prev]
-      next[index] = { ...(next[index] || { ceremony: false, reception: false }), ...updates }
-      return next
-    })
-  }
-
-  const setEventAttendance = (index, eventKey, attending) => {
-    setTargetResponses((prev) => {
-      const next = [...prev]
-      const selections = eventSelectionsFromStatus(next[index] || 'Awaiting response')
-      if (attending === null) {
-        next[index] = 'Awaiting response'
-        return next
-      }
-      selections[eventKey] = attending
-      next[index] = statusFromSelections(selections)
-      return next
-    })
-    if (attending === null) {
-      markEventTouched(index, { ceremony: false, reception: false })
-    } else {
-      markEventTouched(index, { [eventKey]: true })
-    }
-  }
-
-  const setTischResponse = (index, value) => {
-    setTargetTischResponses((prev) => {
-      const next = [...prev]
-      next[index] = value
-      return next
-    })
-  }
-
-  const clearSubmissionFlag = () => {
-    try {
-      window.localStorage.removeItem(RSVP_STORAGE_KEY)
-    } catch (error) {
-      console.warn('Unable to clear RSVP submission flag', error)
-    }
-  }
-
-  const handleClearDoodle = () => {
-    if (submissionLocked) return
-    doodleBoardRef.current?.clear?.()
-  }
-
-  const handleAllowResubmit = () => {
-    clearSubmissionFlag()
-    setHasSubmitted(false)
-    setSubmissionAction('created')
-    setFormStatus('idle')
-    setFormError('')
-  }
-
-  const handleLookup = (event) => {
-    event.preventDefault()
-    const query = lookupQuery.trim()
-    if (!query) return
-    setLookupError('')
-    const households = loadInitialHouseholds().map(normalizeHousehold)
-    const queryKey = normalizeSlug(query)
-    if (!queryKey) return
-    // Try matching as a slug
-    let match = households.find((h) => getHouseholdSlugKey(h) === queryKey)
-    // Try matching against individual guest names
-    if (!match) {
-      match = households.find((h) =>
-        (h.guests || []).some((g) => normalizeSlug(g.name) === queryKey),
-      )
-    }
-    // Try matching against envelope name
-    if (!match) {
-      match = households.find((h) => normalizeSlug(h.envelopeName) === queryKey)
-    }
-    if (match) {
-      const slug = getHouseholdSlugKey(match)
-      window.history.pushState({}, '', '/' + encodeURIComponent(slug))
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    } else {
-      setLookupError(
-        "We couldn't find a match. Try your full name as it appears on your invitation envelope, or the name of another person in your household.",
-      )
-    }
-  }
-
-  const handleHouseholdSubmit = async (event) => {
-    event.preventDefault()
-    if (!householdMatch || targetLocked) return
-    setFormStatus('submitting')
-    setFormError('')
-
-    // Build the updated household from the server-sourced match (not from
-    // localStorage, which on a guest's device only holds demo seed data).
-    const slugKey = getHouseholdSlugKey(householdMatch)
-    const guests = (householdMatch.guests || []).map((guest, index) => ({
-      ...guest,
-      rsvpStatus: targetResponses[index] || guest.rsvpStatus || 'Awaiting response',
-      tischRsvp: normalizeTischRsvp(targetTischResponses[index], householdMatch?.tischInvited),
-      dietary: targetDietaries[index] || guest.dietary || 'None',
-      plusOneAccepted:
-        guest.type !== 'plus-one' && guest.plusOneAllowed ? Boolean(targetPlusOnes[index]) : false,
-    }))
-    // A +1 answer only counts for guests whose allotment isn't already filled
-    // by a named +1 card (those RSVP through their own card).
-    const filledHosts = new Set(
-      guests.filter((guest) => guest.type === 'plus-one' && guest.plusOneOf).map((guest) => guest.plusOneOf),
-    )
-    const anyPlusOneComing = guests.some(
-      (guest) => guest.type !== 'plus-one' && guest.plusOneAllowed && !filledHosts.has(guest.id) && guest.plusOneAccepted,
-    )
-    const anyAccepted =
-      guests.some((guest) => ['Both events', 'Ceremony only', 'Reception only'].includes(normalizeRsvpStatus(guest.rsvpStatus))) ||
-      anyPlusOneComing
-    const allDeclined = guests.every((guest) => normalizeRsvpStatus(guest.rsvpStatus) === 'Not attending') && !anyPlusOneComing
-    const rsvpStatus = anyAccepted ? 'Accepted' : allDeclined ? 'Declined' : 'Awaiting response'
-    // applyPlusOneModel re-derives the household-level +1 fields for legacy readers.
-    const refreshed = applyPlusOneModel({
-      ...householdMatch,
-      email: targetEmail,
-      guests,
-      notes: targetNotes,
-      rsvpStatus,
-      rsvpLocked: true,
-      rsvpRespondedAt: new Date().toISOString(),
-    })
-
-    try {
-      // Persist to the shared guest list (S3) so the RSVP reaches the manager.
-      // Without this the response only ever lived in the guest's own browser.
-      const response = await fetch(`${FUNCTIONS_BASE}/guest-list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upserts: [refreshed] }),
-      })
-      if (!response.ok) {
-        throw new Error('Save failed')
-      }
-
-      // Cache locally so a returning guest sees their saved answers immediately.
-      try {
-        const households = loadInitialHouseholds()
-        const hasMatch = households.some((household) => getHouseholdSlugKey(household) === slugKey)
-        const nextHouseholds = hasMatch
-          ? households.map((household) => (getHouseholdSlugKey(household) === slugKey ? refreshed : household))
-          : [...households, refreshed]
-        window.localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(nextHouseholds))
-      } catch (error) {
-        console.warn('Unable to cache RSVP locally', error)
-      }
-
-      onHouseholdUpdate?.(refreshed)
-      setTargetLocked(true)
-      setFormStatus('success')
-      setSubmissionAction('updated')
-      setHasSubmitted(true)
-    } catch (error) {
-      console.error('household rsvp save error', error)
-      setFormStatus('error')
-      setFormError('Unable to save RSVP right now. Please try again.')
-    }
-  }
 
   const refreshGallery = async () => {
     setGalleryLoading(true)
@@ -452,52 +245,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
   useEffect(() => {
     refreshGallery()
   }, [])
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(RSVP_STORAGE_KEY)
-      if (stored === 'true') {
-        setHasSubmitted(true)
-      }
-    } catch (error) {
-      console.warn('Unable to read RSVP submission flag', error)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!householdMatch) {
-      setTargetResponses([])
-      setEventTouched([])
-      setTargetTischResponses([])
-      setTargetDietaries([])
-      setTargetPlusOnes([])
-      setTargetNotes('')
-      setTargetEmail('')
-      setTargetLocked(false)
-      setHasSubmitted(false)
-      setSubmissionAction('created')
-      return
-    }
-    setTargetResponses((householdMatch.guests || []).map((guest) => normalizeRsvpStatus(guest.rsvpStatus)))
-    setEventTouched(
-      (householdMatch.guests || []).map((guest) => {
-        // A stored decisive status means both events were already answered;
-        // "Awaiting response" means neither has been touched yet.
-        const answered = normalizeRsvpStatus(guest.rsvpStatus) !== 'Awaiting response'
-        return { ceremony: answered, reception: answered }
-      }),
-    )
-    setTargetTischResponses(
-      (householdMatch.guests || []).map((guest) => normalizeTischRsvp(guest.tischRsvp, householdMatch.tischInvited)),
-    )
-    setTargetDietaries((householdMatch.guests || []).map((guest) => guest.dietary || 'None'))
-    setTargetPlusOnes((householdMatch.guests || []).map((guest) => Boolean(guest.plusOneAccepted)))
-    setTargetNotes(householdMatch.notes || '')
-    setTargetEmail(householdMatch.email || '')
-    setTargetLocked(Boolean(householdMatch.rsvpLocked))
-    setHasSubmitted(Boolean(householdMatch.rsvpLocked))
-    setSubmissionAction(householdMatch.rsvpLocked ? 'updated' : 'created')
-  }, [householdMatch])
 
   const triggerFilePicker = () => {
     hiddenFileInput.current?.click()
@@ -572,20 +319,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
     }
   }
 
-  const renderDoodleArea = (wrapperClass = '', boardWrapperClass = '') => (
-    <div className={`space-y-3 ${wrapperClass}`}>
-      <DoodleBoard ref={doodleBoardRef} disabled={submissionLocked} onHasDrawingChange={setHasDoodle} className={`mx-auto w-full ${boardWrapperClass}`} />
-      <button
-        type="button"
-        onClick={handleClearDoodle}
-        disabled={!hasDoodle || submissionLocked}
-        className="rounded-full border border-sage/40 px-4 py-2 text-[0.65rem] uppercase tracking-[0.4em] text-sage-dark transition hover:border-sage hover:text-sage-dark disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Clear doodle
-      </button>
-    </div>
-  )
-
   return (
     <>
       <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
@@ -605,15 +338,7 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           </nav>
 
           <div className="pt-12">
-            <div className="flex items-center gap-5 sm:gap-6">
-              <h1 className="font-serif text-[15vw] leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
-              <a
-                href="#rsvp"
-                className="inline-flex h-20 w-20 min-h-[5rem] min-w-[5rem] flex-none items-center justify-center rounded-full border border-white/70 bg-white/10 text-lg font-serif italic uppercase tracking-[0.15em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:hidden"
-              >
-                RSVP
-              </a>
-            </div>
+            <h1 className="font-serif text-[15vw] leading-tight sm:text-6xl md:text-7xl lg:text-8xl">Erika &amp; Oliver</h1>
           </div>
 
           <div className="space-y-4 pt-10">
@@ -631,12 +356,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
         </div>
 
-        <a
-          href="#rsvp"
-          className="absolute left-1/2 top-1/2 hidden h-28 w-28 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-white/10 text-[1.25rem] font-serif italic uppercase tracking-[0.25em] text-white text-center leading-none backdrop-blur-2xl transition hover:border-white md:flex"
-        >
-          RSVP
-        </a>
       </section>
 
       <section id="faq" className="mx-auto mt-12 max-w-5xl rounded-2xl border border-white/50 bg-white/80 p-10 text-charcoal shadow-frame backdrop-blur">
@@ -807,337 +526,6 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         </div>
       </section>
 
-      <section id="rsvp" className="mx-auto mt-16 max-w-5xl rounded-2xl bg-white/80 p-10 text-charcoal shadow-frame backdrop-blur">
-        <div className="space-y-8">
-          <div className="space-y-4">
-            <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">RSVP</p>
-            <h2 className="font-serif text-4xl text-sage-dark">Let us know you're coming</h2>
-            <p className="text-sm text-charcoal/80">We kindly request a response by <strong>July 31</strong> so we can finalize guest counts.</p>
-            <ul className="space-y-3 text-sm text-charcoal/75">
-              <li>• Search your name or the name of anyone in your household to find your form.</li>
-              <li>• Use the notes field for accessibility needs, questions, or song requests.</li>
-            </ul>
-          </div>
-
-          <div className="grid gap-8 md:grid-cols-[1.6fr,1fr]">
-            <div className="space-y-4">
-            {hasSubmitted && (
-              <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
-                <p>
-                  {submissionAction === 'updated'
-                    ? 'We have updated your RSVP with the latest info.'
-                    : 'Thanks! We already have your RSVP on file.'}
-                </p>
-                {!isSlugRsvp && (
-                  <>
-                    <p className="mt-2 text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                      Need to make a change? Click below to unlock the form.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleAllowResubmit}
-                      className="mt-3 rounded-full border border-sage/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-sage-dark transition hover:border-sage hover:text-sage-dark"
-                    >
-                      Update RSVP
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            {isSlugRsvp ? (
-              <form onSubmit={handleHouseholdSubmit} className="space-y-6" aria-disabled={targetLocked}>
-                <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
-                  <p className="font-semibold text-sage-dark">RSVP for {householdMatch?.envelopeName}</p>
-                  {targetLocked ? (
-                    <p className="mt-1 font-semibold text-sage-dark">✓ We've already received your RSVP — your responses are shown below.</p>
-                  ) : (
-                    <p className="mt-1 text-charcoal/70">We don't have an RSVP from your household yet. Please reply for each person on your invite below.</p>
-                  )}
-                  {isTischInvite && (
-                    <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                      Tisch invite: please arrive by {TISCH_START_TIME} for singing, toasts, and ketubah signing before the ceremony.
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label htmlFor="slug-email" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                    Email for updates
-                  </label>
-                  <input
-                    id="slug-email"
-                    type="email"
-                    value={targetEmail}
-                    onChange={(event) => setTargetEmail(event.target.value)}
-                    disabled={targetLocked}
-                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
-                  />
-                </div>
-
-                {(householdMatch?.guests || []).map((guest, index) => {
-                  const current = targetResponses[index] || 'Awaiting response'
-                  const selections = eventSelectionsFromStatus(current)
-                  // Offer the +1 checkbox only on guests with an open allotment —
-                  // a named +1 card answers through its own card instead.
-                  const plusOneFilled = (householdMatch?.guests || []).some(
-                    (entry) => entry.type === 'plus-one' && entry.plusOneOf === guest.id,
-                  )
-                  const offersPlusOne = guest.type !== 'plus-one' && Boolean(guest.plusOneAllowed) && !plusOneFilled
-                  const setPlusOneComing = (value) =>
-                    setTargetPlusOnes((prev) => {
-                      const next = [...prev]
-                      next[index] = value
-                      return next
-                    })
-                  const setDietary = (value) =>
-                    setTargetDietaries((prev) => {
-                      const next = [...prev]
-                      next[index] = value
-                      return next
-                    })
-                  const dietaryValue = targetDietaries[index] || 'None'
-                  const tischValue = normalizeTischRsvp(targetTischResponses[index], isTischInvite)
-                  const touched = eventTouched[index] || { ceremony: false, reception: false }
-                  const markNotAttending = () => {
-                    setTargetResponses((prev) => {
-                      const next = [...prev]
-                      next[index] = 'Not attending'
-                      return next
-                    })
-                    markEventTouched(index, { ceremony: true, reception: true })
-                    if (isTischInvite) {
-                      setTischResponse(index, 'Not attending')
-                    }
-                  }
-                  return (
-                    <div key={guest.id} className="space-y-3 rounded-2xl border border-sage/20 bg-white/70 p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-sage-dark">{guest.name}, are you coming?</p>
-                      {isTischInvite && (
-                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
-                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Tisch {TISCH_START_TIME}</span>
-                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">pre-ceremony</span>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                            {[
-                              { value: 'Attending', label: 'I’ll be there' },
-                              { value: 'Not attending', label: 'Can’t make it' },
-                            ].map((option) => {
-                              const isActive = tischValue === option.value
-                              return (
-                                <button
-                                  key={option.value}
-                                  type="button"
-                                  disabled={targetLocked}
-                                  onClick={() => setTischResponse(index, option.value)}
-                                  className={`rounded-full border px-4 py-2 transition ${
-                                    isActive
-                                      ? 'border-sage bg-sage text-white shadow-sm'
-                                      : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
-                                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                                >
-                                  {option.label}
-                                </button>
-                              )
-                            })}
-                          </div>
-                          <p className="mt-2 text-xs text-charcoal/70">
-                            What’s a tisch? A spirited gathering with songs, toasts, and well wishes before the ceremony.
-                          </p>
-                        </div>
-                      )}
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
-                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Ceremony</span>
-                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">Garden chuppah</span>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                            <button
-                              type="button"
-                              disabled={targetLocked}
-                              onClick={() => setEventAttendance(index, 'ceremony', true)}
-                              className={`rounded-full border px-4 py-2 transition ${
-                                selections.ceremony
-                                  ? 'border-sage bg-sage text-white shadow-sm'
-                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
-                              } disabled:cursor-not-allowed disabled:opacity-60`}
-                            >
-                              I’ll be there
-                            </button>
-                            <button
-                              type="button"
-                              disabled={targetLocked}
-                              onClick={() => setEventAttendance(index, 'ceremony', false)}
-                              className={`rounded-full border px-4 py-2 transition ${
-                                touched.ceremony && !selections.ceremony
-                                  ? 'border-sage bg-sage text-white shadow-sm'
-                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
-                              } disabled:cursor-not-allowed disabled:opacity-60`}
-                            >
-                              Skip ceremony
-                            </button>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-sage/30 bg-white/70 p-3 shadow-sm">
-                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="text-[0.7rem] uppercase tracking-[0.3em] text-sage-dark/70">Reception</span>
-                            <span className="text-[0.65rem] uppercase tracking-[0.15em] text-charcoal/60">Dinner + dancing</span>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-2 text-sm">
-                            <button
-                              type="button"
-                              disabled={targetLocked}
-                              onClick={() => setEventAttendance(index, 'reception', true)}
-                              className={`rounded-full border px-4 py-2 transition ${
-                                selections.reception
-                                  ? 'border-sage bg-sage text-white shadow-sm'
-                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
-                              } disabled:cursor-not-allowed disabled:opacity-60`}
-                            >
-                              I’ll be there
-                            </button>
-                            <button
-                              type="button"
-                              disabled={targetLocked}
-                              onClick={() => setEventAttendance(index, 'reception', false)}
-                              className={`rounded-full border px-4 py-2 transition ${
-                                touched.reception && !selections.reception
-                                  ? 'border-sage bg-sage text-white shadow-sm'
-                                  : 'border-sage/40 bg-white text-sage-dark hover:border-sage hover:bg-sage/10'
-                              } disabled:cursor-not-allowed disabled:opacity-60`}
-                            >
-                              Skip reception
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-sm">
-                        <button
-                          type="button"
-                          disabled={targetLocked}
-                          onClick={markNotAttending}
-                          className="rounded-full border border-rose-200 px-4 py-2 font-semibold text-rose-700 transition hover:border-rose-400 hover:text-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          Can’t attend either
-                        </button>
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">Dietary preference</label>
-                        <select
-                          value={dietaryValue}
-                          onChange={(event) => setDietary(event.target.value)}
-                          disabled={targetLocked}
-                          className="mt-2 w-full rounded-xl border border-sage/30 bg-white/90 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
-                        >
-                          {dietaryOptions.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      {offersPlusOne && (
-                        <label className="flex items-center gap-3 rounded-xl border border-sage/30 bg-white/70 px-4 py-3 text-sm text-charcoal/80">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(targetPlusOnes[index])}
-                            onChange={(event) => setPlusOneComing(event.target.checked)}
-                            disabled={targetLocked}
-                            className="accent-sage h-4 w-4"
-                          />
-                          <span className="font-semibold text-sage-dark">
-                            {guest.name ? `${guest.name} is bringing a +1` : 'Bringing a +1'}
-                          </span>
-                        </label>
-                      )}
-                    </div>
-                  )
-                })}
-
-                <div>
-                  <label htmlFor="slug-notes" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                    Notes / Requests
-                  </label>
-                  <textarea
-                    id="slug-notes"
-                    rows={3}
-                    value={targetNotes}
-                    onChange={(event) => setTargetNotes(event.target.value)}
-                    disabled={targetLocked}
-                    className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2 disabled:bg-sage/10"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="submit"
-                    disabled={targetLocked || formStatus === 'submitting'}
-                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark disabled:cursor-not-allowed disabled:bg-sage/60"
-                  >
-                    {formStatus === 'submitting' ? 'Saving…' : targetLocked ? 'RSVP locked' : 'Submit RSVP'}
-                  </button>
-                  {formStatus === 'error' && formError && (
-                    <p className="text-sm text-amber-700" role="alert">
-                      {formError}
-                    </p>
-                  )}
-                </div>
-              </form>
-            ) : (
-              <div className="space-y-6">
-                <div className="rounded-2xl border border-sage/30 bg-sage/10 p-4 text-sm text-sage-dark">
-                  <p className="font-semibold text-sage-dark">Find your RSVP</p>
-                  <p className="mt-1 text-charcoal/70">
-                    Search your name or the name of anyone in your household to find your custom RSVP form.
-                  </p>
-                </div>
-                <form onSubmit={handleLookup} className="space-y-4">
-                  <div>
-                    <label htmlFor="lookupQuery" className="text-xs uppercase tracking-[0.3em] text-sage-dark/70">
-                      Your name
-                    </label>
-                    <input
-                      id="lookupQuery"
-                      type="text"
-                      required
-                      value={lookupQuery}
-                      onChange={(event) => {
-                        setLookupQuery(event.target.value)
-                        setLookupError('')
-                      }}
-                      className="mt-2 w-full rounded-xl border border-sage/20 bg-white/70 px-4 py-3 text-sm outline-none ring-sage/30 transition focus:border-sage focus:ring-2"
-                      placeholder="e.g. Erika Anclade or Oliver Shoulson"
-                    />
-                  </div>
-                  {lookupError && (
-                    <p className="text-sm text-amber-700" role="alert">
-                      {lookupError}
-                    </p>
-                  )}
-                  <button
-                    type="submit"
-                    className="rounded-full bg-sage px-6 py-3 text-xs uppercase tracking-[0.4em] text-white transition hover:bg-sage-dark"
-                  >
-                    Find my RSVP
-                  </button>
-                </form>
-              </div>
-            )}
-          </div>
-            <div className="space-y-4">
-              {renderDoodleArea('', 'max-w-sm mx-auto')}
-            </div>
-          </div>
-        </div>
-      </section>
-      {formStatus === 'success' && (
-        <div className="mx-auto mt-6 w-full max-w-5xl rounded-2xl border border-sage/30 bg-sage/10 p-4 text-center text-sm text-sage-dark" role="status">
-          <p>{submissionAction === 'updated' ? 'We updated your RSVP. Thank you!' : "Thanks! We'll be in touch with next steps."}</p>
-        </div>
-      )}
-
       <section id="registry" className="mx-auto mt-16 max-w-5xl rounded-2xl border border-white/50 bg-white/70 p-10 text-charcoal shadow-frame backdrop-blur">
         <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Registry</p>
         <h2 className="mt-4 font-serif text-4xl text-sage-dark">Gifts &amp; Registry</h2>
@@ -1218,7 +606,7 @@ function App() {
     loadRemote()
   }, [])
 
-  return isGuestRoute ? <GuestListManager /> : <WeddingSite householdMatch={slugHousehold} onHouseholdUpdate={setSlugHousehold} />
+  return isGuestRoute ? <GuestListManager /> : <WeddingSite householdMatch={slugHousehold} />
 }
 
 export default App
