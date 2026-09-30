@@ -12,6 +12,7 @@ import GuestListManager, {
 const TISCH_START_TIME = '4:00 PM'
 const navLinks = [
   { label: 'Home', href: '#home' },
+  { label: 'FAQ', href: '#faq' },
   { label: 'Gallery', href: '#gallery' },
   { label: 'Travel', href: '#travel' },
   { label: 'RSVP', href: '#rsvp' },
@@ -20,7 +21,7 @@ const navLinks = [
 
 const defaultDetails = [
   { label: 'Date', value: 'October 11, 2026' },
-  { label: 'Arrival', value: 'Guests at 4:00 PM' },
+  { label: 'Arrival', value: 'Guests at 4:30 PM' },
   { label: 'Venue', value: 'The Garden at Elm Bank' },
   { label: 'City', value: 'Wellesley, Massachusetts' },
   { label: 'RSVP by', value: 'July 31, 2026' },
@@ -56,10 +57,58 @@ const dressCodePalette = [
   'rgb(199, 152, 79)',
 ]
 
+const faqItems = [
+  {
+    q: 'When should I arrive?',
+    a: '4:30 for a 5:00 ceremony unless otherwise notified!',
+  },
+  {
+    q: 'Will there be transportation from the hotel?',
+    a: 'Unfortunately, because of weight restrictions on a bridge leading into the property, we are not able to provide a bus or shuttle from the hotel. The garden is a very short Uber/taxi ride from the hotel, though!',
+  },
+  {
+    q: 'Where do I get dropped off, and is there parking?',
+    a: 'Rideshare drop-off is at the Cheney Gate entrance. There is limited parking on site, so we recommend Uber/taxi or carpooling if you can.',
+  },
+  {
+    key: 'dress',
+    q: 'What should I wear?',
+    a: 'The dress code is somewhere in the cocktail/semi-formal realm. For those in tailored clothing, a jacket is appropriate, and a tie is very much appreciated. For those who wear dresses, midi or maxi length is fine. We ask everyone to join in the autumnal spirit by wearing fall colors if you can! See below for inspiration.',
+  },
+  {
+    q: 'What shoes should I wear?',
+    a: 'Weather permitting, the ceremony is outdoors on grass, so block heels, wedges, or flats will serve you better than stilettos.',
+  },
+  {
+    q: 'What should I expect at the ceremony?',
+    a: 'The ceremony is based on a traditional Jewish wedding ceremony, but with many personal deviations and customizations crafted by Erika and Oliver in collaboration with their loved ones and with their officiant. We will be providing ceremony programs to help guide you through the symbols and steps of a Jewish wedding.',
+  },
+  {
+    q: 'Is the food kosher?',
+    a: 'Yes! A dairy kosher meal will be provided during the reception.',
+  },
+  {
+    q: 'Can I film/take pictures on my phone during the ceremony?',
+    a: 'You are welcome to film and take pictures during the processional and recessional, but we ask for your undivided attention during the solemnization of the marriage beneath the chuppah.',
+  },
+  {
+    q: 'How can I share my photos?',
+    a: 'Upload them to the gallery below (or scan the QR code at the venue). We would love to see the day through your eyes!',
+  },
+  {
+    q: 'When will it end?',
+    a: 'Why are you asking 🤨? Jk, Elm Bank gives us a hard stop of 10:30 PM.',
+  },
+  {
+    q: 'What kind of weather can I expect?',
+    a: 'Your guess is as good as ours at this point. Weather permitting, the ceremony will be outside in the Italianate Garden, and forecasts are showing temperatures in the 50s, so bring a layer! In the event of rain, the ceremony will be moved inside to the Hunnewell Building.',
+  },
+]
+
 const baseAgendaItems = [
   {
     key: 'arrival',
-    time: '4:00 PM',
+    time: '4:30 PM',
     title: 'Guest Arrival',
     description: 'Stroll the grounds, say hi to family, and find your seat before we head to the chuppah.',
   },
@@ -539,24 +588,15 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
 
   return (
     <>
-      {!hasSubmitted && (
-        <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
-          <p>
-            <span className="font-semibold">RSVP by July 31</span>
-            {' — '}
-            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">let us know you're coming</a>
-          </p>
-          <p className="mt-1 font-bold">
-            Already RSVP'd?{' '}
-            <a href="#rsvp" className="underline underline-offset-2 transition hover:text-sage">Type a name from your household into the form</a>{' '}
-            to confirm we've received it.
-          </p>
-        </div>
-      )}
-      <main className={`min-h-screen bg-mist px-4 py-12 sm:px-8${!hasSubmitted ? ' pt-36 sm:pt-24' : ''}`}>
+      <div className="fixed top-0 left-0 right-0 z-50 border-b border-sage/30 bg-bone/90 px-6 py-3 text-center text-sm text-sage-dark backdrop-blur">
+        <p className="font-semibold">
+          We can't wait to see you so soon! Please arrive at Elm Bank at 4:30 for a ceremony beginning at 5!
+        </p>
+      </div>
+      <main className="min-h-screen bg-mist px-4 py-12 pt-28 sm:px-8 sm:pt-20">
       <section className="relative mx-auto flex min-h-[520px] max-w-5xl flex-col overflow-hidden rounded-2xl bg-bone shadow-frame md:min-h-[600px] md:flex-row" id="home">
         <div className="flex flex-col justify-between bg-sage px-6 py-10 text-bone md:w-1/2 md:px-8 lg:px-10">
-          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 md:flex-nowrap md:gap-6 md:text-[0.65rem] md:tracking-[0.5em]">
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.55rem] uppercase tracking-[0.3em] text-bone/70 lg:flex-nowrap md:gap-5 md:text-[0.65rem] md:tracking-[0.35em]">
             {navLinks.map((link) => (
               <a key={link.label} href={link.href} className="hover:text-white transition-colors">
                 {link.label}
@@ -597,6 +637,32 @@ function WeddingSite({ householdMatch, onHouseholdUpdate }) {
         >
           RSVP
         </a>
+      </section>
+
+      <section id="faq" className="mx-auto mt-12 max-w-5xl rounded-2xl border border-white/50 bg-white/80 p-10 text-charcoal shadow-frame backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">FAQ</p>
+        <h2 className="mt-3 font-serif text-4xl text-sage-dark">Good questions</h2>
+        <div className="mt-6 divide-y divide-sage/20">
+          {faqItems.map((item) => (
+            <div key={item.q} className="py-5">
+              <p className="text-lg font-semibold text-sage-dark">{item.q}</p>
+              <p className="mt-2 text-sm leading-relaxed text-charcoal/80">{item.a}</p>
+              {item.key === 'dress' && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {dressCodePalette.map((color, index) => (
+                    <span
+                      key={color}
+                      role="img"
+                      aria-label={`Suggested fall color ${index + 1}`}
+                      className="h-10 w-10 rounded-full shadow-sm ring-1 ring-black/10"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </section>
 
       <section id="agenda" className="mx-auto mt-12 max-w-5xl rounded-2xl border border-white/50 bg-white/75 p-10 text-charcoal shadow-frame backdrop-blur">
