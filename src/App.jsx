@@ -399,7 +399,6 @@ function WeddingSite({ householdMatch }) {
           <div>
             <p className="text-xs uppercase tracking-[0.5em] text-sage-dark/60">Agenda</p>
             <h2 className="mt-3 font-serif text-4xl text-sage-dark">Day-of flow</h2>
-            <p className="mt-2 text-sm text-charcoal/75">Times update based on your invite link. You’ll only see the tisch if you’re invited.</p>
           </div>
           {isTischInvite && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
